@@ -1,0 +1,131 @@
+################OPTION###################
+# release or debug
+VERTYPE=RELEASE
+
+KERNEL:=$(shell uname)
+LIBDIR = linux
+CPPSTD = c++11
+
+ARCH:=$(shell uname -m)
+RC:=$(ARCH)
+BIT32:=i686
+BIT64:=x86_64
+
+$(info KERNEL=$(KERNEL))
+$(info ARCH=$(ARCH))
+
+ifeq ($(KERNEL),Darwin)
+    LIBDIR = osx
+endif
+
+ifeq ($(RC),$(BIT32))
+	SHAREDLIB = -lefc32 -leso32 -lrt -lm -ldl -lpthread -lcrypto -lssl
+else
+	SHAREDLIB = -lefc64 -leso64 -liconv -ldl -lpthread -lcrypto -lssl
+endif
+
+ifeq ($(VERTYPE), RELEASE)
+CCOMPILEOPTION = -fPIC -c -g -O2 -D__MAIN__
+CPPCOMPILEOPTION = -std=$(CPPSTD) -fPIC -c -g -O2 -fpermissive -D__MAIN__
+DBPROXY = dbproxy
+else
+CCOMPILEOPTION = -fPIC -c -g -D__MAIN__
+CPPCOMPILEOPTION = -std=$(CPPSTD) -fPIC -c -g -fpermissive -DDEBUG -D__MAIN__
+DBPROXY = dbproxy_d
+endif
+
+CCOMPILE = gcc
+CPPCOMPILE = g++
+INCLUDEDIR = -I../../../CxxJDK/inc \
+	-I../../../CxxJDK/inc/comm \
+	-I../../../CxxJDK/inc/efc \
+	-I../../../CxxJDK/inc/efc/concurrent \
+	-I../../../CxxJDK/inc/efc/cpp11 \
+	-I../../../CxxJDK/inc/efc/nio \
+	-I../../../CxxJDK/inc/libc \
+	-I../../../CxxFiber \
+	-I../../../CxxFiber/inc \
+	-I../../../CxxLog4j \
+	-I../../../CxxLog4j/inc \
+	-I../../../CxxConet \
+	-I../../../CxxConet/inc \
+	-I../../../CxxConet/filter/http \
+	-I/usr/local/Cellar/openssl/1.0.2g/include \
+
+LINK = g++
+LINKOPTION = -std=$(CPPSTD) -g
+LIBDIRS = -L../../../CxxJDK/lib/$(LIBDIR)
+APPENDLIB = 
+
+BASE_OBJS = \
+	../../../CxxConet/src/EBlacklistFilter.o \
+	../../../CxxConet/src/EIoBuffer.o \
+	../../../CxxConet/src/EIoFilterAdapter.o \
+	../../../CxxConet/src/EIoFilterChain.o \
+	../../../CxxConet/src/EIoFilterChainBuidler.o \
+	../../../CxxConet/src/EIoServiceStatistics.o \
+	../../../CxxConet/src/EIoSession.o \
+	../../../CxxConet/src/ESocketAcceptor.o \
+	../../../CxxConet/src/ESocketSession.o \
+	../../../CxxConet/src/ESubnet.o \
+	../../../CxxConet/src/EWhitelistFilter.o \
+	../../../CxxConet/filter/http/EHttpCodecFilter.o \
+	../../../CxxConet/filter/http/EHttpRequest.o \
+	../../../CxxConet/filter/http/EHttpResponse.o \
+	../../../CxxFiber/src/EContext.o \
+	../../../CxxFiber/src/EFiber.o \
+	../../../CxxFiber/src/EFiberBlocker.o \
+	../../../CxxFiber/src/EFiberCondition.o \
+	../../../CxxFiber/src/EFiberDebugger.o \
+	../../../CxxFiber/src/EFiberMutex.o \
+	../../../CxxFiber/src/EFiberScheduler.o \
+	../../../CxxFiber/src/EFiberTimer.o \
+	../../../CxxFiber/src/EFileContext.o \
+	../../../CxxFiber/src/EHooker.o \
+	../../../CxxFiber/src/EIoWaiter.o \
+	../../../CxxFiber/src/eco_ae.o \
+	../../../CxxFiber/src/eco_ae_epoll.o \
+	../../../CxxFiber/src/eco_ae_kqueue.o \
+	../../../CxxLog4j/src/EAbstractAppender.o \
+	../../../CxxLog4j/src/EAbstractLayout.o \
+	../../../CxxLog4j/src/EAppenderFactory.o \
+	../../../CxxLog4j/src/EConfiguration.o \
+	../../../CxxLog4j/src/EConfigurator.o \
+	../../../CxxLog4j/src/EConsoleAppender.o \
+	../../../CxxLog4j/src/EDailyRollingFileAppender.o \
+	../../../CxxLog4j/src/EFileAppender.o \
+	../../../CxxLog4j/src/EFileLogWriter.o \
+	../../../CxxLog4j/src/EHTMLLayout.o \
+	../../../CxxLog4j/src/ELayoutFactory.o \
+	../../../CxxLog4j/src/ELogEvent.o \
+	../../../CxxLog4j/src/ELoggerConfig.o \
+	../../../CxxLog4j/src/ELoggerImp.o \
+	../../../CxxLog4j/src/ELoggerManager.o \
+	../../../CxxLog4j/src/ELoggerManagerImp.o \
+	../../../CxxLog4j/src/EMDC.o \
+	../../../CxxLog4j/src/ENDC.o \
+	../../../CxxLog4j/src/EOptionConverter.o \
+	../../../CxxLog4j/src/EPatternLayout.o \
+	../../../CxxLog4j/src/ERollingFileAppender.o \
+	../../../CxxLog4j/src/ESimpleLayout.o \
+	../../../CxxLog4j/src/ETTCCLayout.o \
+	../../../CxxLog4j/src/ETransform.o \
+
+DBPROXY_OBJS = main.o ../../dblib/src/EDatabase.o \
+
+$(DBPROXY): $(BASE_OBJS) $(DBPROXY_OBJS) $(APPENDLIB)
+	$(LINK) $(LINKOPTION) -o $(DBPROXY) $(LIBDIRS) $(BASE_OBJS) $(DBPROXY_OBJS) $(SHAREDLIB) $(APPENDLIB)
+
+clean: 
+	rm -f $(BASE_OBJS) $(DBPROXY_OBJS) $(BENCHMARK)
+
+all: clean $(DBPROXY) clean
+.PRECIOUS:%.cpp %.c
+.SUFFIXES:
+.SUFFIXES:  .c .o .cpp
+
+.cpp.o:
+	$(CPPCOMPILE) -c -o $*.o $(CPPCOMPILEOPTION) $(INCLUDEDIR)  $*.cpp
+
+.c.o:
+	$(CCOMPILE) -c -o $*.o $(CCOMPILEOPTION) $(INCLUDEDIR) $*.c

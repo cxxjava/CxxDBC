@@ -1,0 +1,92 @@
+################OPTION###################
+
+KERNEL:=$(shell uname)
+LIBDIR = linux
+
+ARCH:=$(shell uname -m)
+RC:=$(ARCH)
+BIT32:=i686
+BIT64:=x86_64
+
+$(info KERNEL=$(KERNEL))
+$(info ARCH=$(ARCH))
+
+CCOMPILE = gcc
+CPPCOMPILE = g++
+LINK = g++
+COMPILEOPTION = -c -O2 -W -fPIC
+OUTPUT = PGSQL.so
+
+ifeq ($(RC),$(BIT32))
+	LIBEFC = -lefc32 -leso32
+else
+	LIBEFC = -lefc64 -leso64
+endif
+
+ifeq ($(KERNEL),Darwin)
+    LIBDIR = osx
+    SHAREDLIB = $(LIBEFC) -lpq_osx -lm -ldl -lpthread -lcrypto
+	LINKOPTION = -dynamiclib -g -o ../../release/$(LIBDIR)/$(OUTPUT)
+else
+	SHAREDLIB = $(LIBEFC) -lpq_linux -lrt -lm -ldl -lpthread -lcrypto
+	LINKOPTION = -shared -g -o ../../release/$(LIBDIR)/$(OUTPUT)
+endif
+
+$(info LIBDIR=$(LIBDIR))
+$(info SHAREDLIB=$(SHAREDLIB))
+
+
+INCLUDEDIR = -I../../../../comm/ \
+	-I../../../../libc/inc \
+	-I../../../../efc/ \
+	-I../../../../efc/inc \
+	-I../../../../efc/inc/concurrent \
+	-I../../../../efc/inc/cpp11 \
+	-I../../../../efc/nio/inc \
+	-I../../../../elog/ \
+	-I/usr/local/Cellar/openssl/1.0.2g/include
+
+LIBDIRS = -L../../../../efc/lib/$(LIBDIR) \
+	-L../../../../libc/lib/$(LIBDIR) \
+	-L./libpq \
+
+APPENDLIB = 
+
+OBJS = EDatabase_pgsql.o \
+	../../src/EDatabase.o \
+
+
+$(OUTPUT): $(OBJS) $(APPENDLIB)
+	$(LINK) $(LINKOPTION) $(LIBDIRS) $(OBJS) $(SHAREDLIB) $(APPENDLIB)
+
+clean: 
+	rm -f $(OBJS)
+
+all: clean $(OUTPUT)
+.PRECIOUS:%.cpp %.c %.C
+.SUFFIXES:
+.SUFFIXES:  .c .o .cpp .ecpp .pc .ec .C .cc .cxx
+
+.cpp.o:
+	$(CPPCOMPILE) -c -o $*.o $(COMPILEOPTION) $(INCLUDEDIR)  $*.cpp
+	
+.cc.o:
+	$(CCOMPILE) -c -o $*.o $(COMPILEOPTION) $(INCLUDEDIR)  $*.cx
+
+.cxx.o:
+	$(CPPCOMPILE) -c -o $*.o $(COMPILEOPTION) $(INCLUDEDIR)  $*.cxx
+
+.c.o:
+	$(CCOMPILE) -c -o $*.o $(COMPILEOPTION) $(INCLUDEDIR) $*.c
+
+.C.o:
+	$(CPPCOMPILE) -c -o $*.o $(COMPILEOPTION) $(INCLUDEDIR) $*.C	
+
+.ecpp.C:
+	$(ESQL) -e $(ESQL_OPTION) $(INCLUDEDIR) $*.ecpp 
+	
+.ec.c:
+	$(ESQL) -e $(ESQL_OPTION) $(INCLUDEDIR) $*.ec
+	
+.pc.cpp:
+	$(PROC)  CPP_SUFFIX=cpp $(PROC_OPTION)  $*.pc

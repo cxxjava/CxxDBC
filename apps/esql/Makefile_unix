@@ -1,0 +1,89 @@
+################OPTION###################
+HAVE_READLINE=1
+
+KERNEL:=$(shell uname)
+LIBDIR = linux
+CPPSTD = c++11
+
+ARCH:=$(shell uname -m)
+RC:=$(ARCH)
+BIT32:=i686
+BIT64:=x86_64
+
+$(info KERNEL=$(KERNEL))
+$(info ARCH=$(ARCH))
+
+ifeq ($(RC),$(BIT32))
+	LIBEFC = -lefc32 -leso32
+else
+	LIBEFC = -lefc64 -leso64
+endif
+
+ifeq ($(KERNEL),Darwin)
+    LIBDIR = osx
+endif
+
+$(info LIBDIR=$(LIBDIR))
+$(info SHAREDLIB=$(SHAREDLIB))
+
+ifeq ($(HAVE_READLINE), 1)
+COMPILEOPTION = -c -g -O2 -DHAVE_READLINE -D__MAIN__
+CPPCOMPILEOPTION = -std=$(CPPSTD) -c -g -O2 -fpermissive -DHAVE_READLINE -D__MAIN__
+SHAREDLIB = $(LIBEFC) -ldl -lcrypto -lssl -lreadline -lpthread
+else
+COMPILEOPTION = -c -g -O2 -D__MAIN__
+CPPCOMPILEOPTION = -std=$(CPPSTD) -c -g -O2 -fpermissive -D__MAIN__
+SHAREDLIB = $(LIBEFC) -ldl -lcrypto -lssl -lpthread
+endif
+
+CCOMPILE = gcc
+CPPCOMPILE = g++
+OUTPUT = esql
+INCLUDEDIR = \
+	-I../../../CxxJDK/inc \
+	-I../../../CxxJDK/inc/comm \
+	-I../../../CxxJDK/inc/efc \
+	-I../../../CxxJDK/inc/efc/concurrent \
+	-I../../../CxxJDK/inc/efc/cpp11 \
+	-I../../../CxxJDK/inc/efc/nio \
+	-I../../../CxxJDK/inc/libc \
+	-I../../../CxxLog4j \
+	-I../../../CxxLog4j/inc \
+	-I../../client/cpp/ \
+	-I/usr/local/Cellar/openssl/1.0.2g/include
+
+LINK = g++
+LINKOPTION = -std=$(CPPSTD) -g -o $(OUTPUT)
+LIBDIRS = -L../../../CxxJDK/lib/$(LIBDIR) \
+	-L/usr/local/Cellar/openssl/1.0.2g/lib
+
+APPENDLIB = 
+OBJS = esql.o \
+	../../client/cpp/src/ECommonStatement.o \
+	../../client/cpp/src/EConnection.o \
+	../../client/cpp/src/EConnectionPool.o \
+	../../client/cpp/src/EDatabaseMetaData.o \
+	../../client/cpp/src/EDBHandler.o \
+	../../client/cpp/src/EResultSet.o \
+	../../client/cpp/src/EResultSetMetaData.o \
+	../../client/cpp/src/ESavepoint.o \
+	../../client/cpp/src/EStatement.o \
+	../../client/cpp/src/EUpdateStatement.o \
+
+$(OUTPUT): $(OBJS) $(APPENDLIB)
+	$(LINK) $(LINKOPTION) $(LIBDIRS) $(OBJS) $(SHAREDLIB) $(APPENDLIB)
+
+clean: 
+	rm -f $(OBJS)
+	rm -f $(OUTPUT)
+
+all: clean $(OUTPUT)
+.PRECIOUS:%.cpp %.c
+.SUFFIXES:
+.SUFFIXES:  .c .o .cpp
+
+.cpp.o:
+	$(CPPCOMPILE) -c -o $*.o $(CPPCOMPILEOPTION) $(INCLUDEDIR)  $*.cpp
+	
+.c.o:
+	$(CCOMPILE) -c -o $*.o $(COMPILEOPTION) $(INCLUDEDIR) $*.c

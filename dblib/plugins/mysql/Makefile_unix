@@ -1,0 +1,84 @@
+################OPTION###################
+
+KERNEL:=$(shell uname)
+LIBDIR = linux
+CPPSTD = c++11
+
+ARCH:=$(shell uname -m)
+RC:=$(ARCH)
+BIT32:=i686
+BIT64:=x86_64
+
+$(info KERNEL=$(KERNEL))
+$(info ARCH=$(ARCH))
+
+CCOMPILE = gcc
+CPPCOMPILE = g++
+LINK = g++
+COMPILEOPTION = -std=$(CPPSTD) -c -O2 -W -fPIC
+OUTPUT = MYSQL.so
+
+ifeq ($(RC),$(BIT32))
+	LIBEFC = -lefc32 -leso32
+else
+	LIBEFC = -lefc64 -leso64
+endif
+
+ifeq ($(KERNEL),Darwin)
+	LIBDIR = osx
+	SHAREDLIB = $(LIBEFC) -lmysqlclient -lm -ldl -lpthread -lcrypto
+	LINKOPTION = -dynamiclib -g -o ../../release/$(LIBDIR)/$(OUTPUT)
+else
+	SHAREDLIB = $(LIBEFC) -lmysqlclient -lrt -lm -ldl -lpthread -lcrypto
+	LINKOPTION = -shared -g -o ../../release/$(LIBDIR)/$(OUTPUT)
+endif
+
+$(info LIBDIR=$(LIBDIR))
+$(info SHAREDLIB=$(SHAREDLIB))
+
+
+INCLUDEDIR = -I../../../../comm/ \
+	-I../../../../libc/inc \
+	-I../../../../efc/ \
+	-I../../../../efc/inc \
+	-I../../../../efc/inc/concurrent \
+	-I../../../../efc/inc/cpp11 \
+	-I../../../../efc/nio/inc \
+	-I../../../../elog/ \
+	-I/usr/local/Cellar/openssl/1.0.2g/include
+
+LIBDIRS = -L../../../../efc/lib/$(LIBDIR) \
+	-L../../../../libc/lib/$(LIBDIR) \
+	-L./connector/lib \
+
+APPENDLIB = 
+
+OBJS = EDatabase_mysql.o \
+	../../src/EDatabase.o \
+
+
+$(OUTPUT): $(OBJS) $(APPENDLIB)
+	$(LINK) $(LINKOPTION) $(LIBDIRS) $(OBJS) $(SHAREDLIB) $(APPENDLIB)
+
+clean: 
+	rm -f $(OBJS)
+
+all: clean $(OUTPUT)
+.PRECIOUS:%.cpp %.c
+.SUFFIXES:
+.SUFFIXES:  .c .o .cpp .C .cc .cxx
+
+.cpp.o:
+	$(CPPCOMPILE) -c -o $*.o $(COMPILEOPTION) $(INCLUDEDIR)  $*.cpp
+	
+.cc.o:
+	$(CCOMPILE) -c -o $*.o $(COMPILEOPTION) $(INCLUDEDIR)  $*.cx
+
+.cxx.o:
+	$(CPPCOMPILE) -c -o $*.o $(COMPILEOPTION) $(INCLUDEDIR)  $*.cxx
+
+.c.o:
+	$(CCOMPILE) -c -o $*.o $(COMPILEOPTION) $(INCLUDEDIR) $*.c
+
+.C.o:
+	$(CPPCOMPILE) -c -o $*.o $(COMPILEOPTION) $(INCLUDEDIR) $*.C	

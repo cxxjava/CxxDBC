@@ -76,7 +76,7 @@
 
   2）动态直连：*EConnection*对象默认构造使用*dbproxy*模式，具体由构造参数`boolean proxy`决定，当`proxy==false`时，*client*访问数据库使用`动态直连`模式，即根据*dbtype*确定动态加载具体的*dblib*数据库访问插件，如`dbtype=='MYSQL'`时，*client*自动动态加载`MYSQL.so`(WIN下为`MYSQL.dll`)。
 
-  3）代理访问：*client*通过*dbproxy*访问数据库，同时*dbproxy*根据*client*的*dbtype*确定具体连接哪个数据库，原来类同`动态直连`时的动态加载过程。
+  3）代理访问：*client*通过*dbproxy*访问数据库，同时*dbproxy*根据*client*的*dbtype*确定具体连接哪个数据库，原理类同`动态直连`时的动态加载过程。
 
   ​
 
@@ -114,9 +114,8 @@
   ```
 
   解压后目录结构如下：
-
+  ```
   apps --        #根目录
-
   	|- certs   #存放SSL证书
   	|- linux   #linux平台程序
   		|- dblib             #数据库插件集合
@@ -125,9 +124,7 @@
   		|- log4e.properties  #dbproxy代理服务日志配置
   		|- esql              #类psql客户端访问程序
   	|- osx     #osx平台程序，子目录结构同linux平台目录
-
-
-  
+  ```
 
 * **esql**：类postgres psql的客户端工具，支持`动态直连`和`代理访问`两种模式。
 

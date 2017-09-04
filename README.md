@@ -1,19 +1,19 @@
 # CxxDBC
 
-##基于C++开发的异种数据库跨平台连接中间件.
+## 基于C++开发的异种数据库跨平台连接中间件.
 
 
 
 ### 目录
-  * [特点](#特点)
-  * [示例](#示例)
-  * [架构](#架构)
-  * [集成](#集成)
-  * [依赖](#依赖)
-  * [TODO](#todo)
-  * [Support](#support)
+- [特点](#特点)
+- [示例](#示例)
+- [架构](#架构)
+- [集成](#集成)
+- [依赖](#依赖)
+- [TODO](#todo)
+- [Support](#support)
 
-####特点
+#### 特点
 
 * 统一接口，支持各类异种数据库的连接访问；
 
@@ -43,7 +43,7 @@
   | Sybase     | 支持   | 支持   | 支持   | 支持   | 支持    | 支持   | 支持   | 存储过程仅支持结果集返回，且不支持参数绑定模式 |
   | 其他         | TODO | TODO | TODO | TODO | TODO  | TODO | TODO |                         |
 
-####示例
+#### 示例
   `c++:`
 
   ```
@@ -131,7 +131,7 @@
 [postgres.cpp](client/cpp/test/postgres.cpp)
 [sybase.cpp](client/cpp/test/sybase.cpp)
 
-####架构
+#### 架构
 * 非CxxDBC常见模式：
 
   ![arch0](img/arch0.png)
@@ -160,20 +160,19 @@
   集合`模式二`和`模式三`的混合模式，图略。
   ​
 
-####集成
+#### 集成
 详见[使用指南](doc/Guide.md)
 
 
-####依赖
+#### 依赖
 1. [CxxJDK](https://github.com/cxxjava/CxxJDK)
 2. [CxxLog4j](https://github.com/cxxjava/CxxLog4j)
 3. [CxxConet](https://github.com/cxxjava/CxxConet)
 
 
-####TODO
+#### TODO
 1. SQL安全审计；
 2. ...
 
-####Support
+#### Support
 Email: [cxxjava@163.com](mailto:cxxjava@163.com)
-

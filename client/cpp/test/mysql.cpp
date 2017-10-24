@@ -7,11 +7,11 @@
 
 #define LOG(fmt,...) ESystem::out->println(fmt, ##__VA_ARGS__)
 
-#define HOST "192.168.0.30"
+#define HOST "192.168.2.61"
 #define PORT "3306"
-#define DATABASE "test"
-#define USERNAME "test"
-#define PASSWORD "test#123321"
+#define DATABASE "mysql"
+#define USERNAME "root"
+#define PASSWORD "password"
 
 static void test_db_connect() {
 	EConnection conn;
@@ -235,11 +235,13 @@ static void test_create_table() {
             "i char (255) NULL ,"
             "j varchar (255) NULL ,"
             "k bigint NULL ,"
-            "l blob NULL ,"
+            "l LONGBLOB NULL ,"
             "m int(2) NULL ,"
             "n int(4) NULL ,"
-            "o bool NULL "
-			") TYPE=InnoDB DEFAULT CHARSET=gb2312");
+            "o bool NULL ,"
+            "p date NULL ,"
+            "q timestamp NULL "
+            ") Engine=InnoDB DEFAULT CHARSET=gb2312");
 	stmt.execute();
 
 	conn.close();
@@ -249,26 +251,38 @@ static void test_sql_insert() {
 	EConnection conn;
 	conn.connect(DATABASE, HOST, atoi(PORT), USERNAME, PASSWORD);
 
+	//large lob
+	ECommonStatement st(&conn);
+	st.setSql("insert into mysql001 (d,e,l) values (1,?,?)");
+	EFileInputStream fis1("/tmp/a.csv");
+	EFileInputStream fis2("/tmp/b.csv");
+	st.bindAsciiStream(&fis1);
+	st.bindBinaryStream(&fis2);
+	st.execute();
+
+	//other
 	EUpdateStatement stmt(&conn);
 	stmt.addBatch("insert into mysql001 (a,b,c,d,e,f,g,h,i,j,k,l) "
 	"values (100000,20,0x616161616161,1,'中午的太阳火辣辣','2005-01-09 23:12:59',21212.4343,3333.0001,"
 	"'舞起来','varchar类型',9223372036854775807,0x61616161616122)");
 	stmt.addBatch("insert into mysql001 (d,e,g) values (1,?,?)");
 	es_buffer_t *buffer = eso_buffer_make(100, 0);
-	for (int i = 0; i < 100; i++) {
+	for (int i = 0; i < 2; i++) {
 		eso_buffer_append(buffer, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa11aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			50);
 	}
 	stmt.bind(DB_dtCLob, (char*)buffer->data, buffer->len);
 	eso_buffer_free(&buffer);
 	stmt.bindFloat(5.44454);
-	stmt.addBatch("insert into mysql001 (a,b,c,d,e,f,i) values (?,?,?,0,?,?,?)");
+	stmt.addBatch("insert into mysql001 (a,b,c,d,e,f,i,p,q) values (?,?,?,0,?,?,?,?,?)");
 	stmt.bindInt(55555);
 	stmt.bindShort(12);
 	stmt.bindBytes((byte *)"\1\2\3\4\0\9\8", 7);
 	stmt.bindString("计费地热 热");
 	stmt.bindDateTime("2005-01-09 23:12:59");
 	stmt.bindString("2222031");
+	stmt.bindDateTime("2005-01-09 23:12:59");
+	stmt.bindDateTime("2005-01-09 23:12:59");
 
 	stmt.setFailedResume(true);
 	stmt.execute();
@@ -289,7 +303,8 @@ static void test_sql_query() {
 	EResultSet* rs = stmt.getResultSet();
 	while (rs->next()) {
 		for (int i=1; i<=rs->getMetaData()->getColumnCount(); i++) {
-			LOG("%s:%s", rs->getMetaData()->getColumnLabel(i).c_str(), rs->isNull(i) ? "is null" : rs->getString(i).c_str());
+			sp<EInputStream> is = rs->getBinaryStream(i);
+			LOG("%s:%d", rs->getMetaData()->getColumnLabel(i).c_str(), is->available());
 		}
 	}
 

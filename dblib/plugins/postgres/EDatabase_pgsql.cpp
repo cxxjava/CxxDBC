@@ -22,6 +22,21 @@ static void to_nbo(double in, double *out) {
     r[1] = htonl((uint32_t)*i);
 }
 
+static EByteBuffer* make_stream_data(sp<EIterator<EInputStream*> > iter) {
+	ES_ASSERT(iter != null);
+	char buf[8192];
+	int len;
+	if (iter->hasNext()) {
+		EInputStream* is = iter->next();
+		EByteBuffer* bb = new EByteBuffer();
+		while ((len = is->read(buf, sizeof(buf))) > 0) {
+			bb->append(buf, len);
+		}
+		return bb;
+	}
+	return null;
+}
+
 //=============================================================================
 
 EDatabase_pgsql::Result::~Result() {
@@ -225,9 +240,8 @@ EDatabase_pgsql::~EDatabase_pgsql() {
 	close();
 }
 
-EDatabase_pgsql::EDatabase_pgsql(ELogger* workLogger, ELogger* sqlLogger,
-		const char* clientIP, const char* version) :
-		EDatabase(workLogger, sqlLogger, clientIP, version),
+EDatabase_pgsql::EDatabase_pgsql(EDBProxyInf* proxy) :
+		EDatabase(proxy),
 		m_Conn(null) {
 }
 
@@ -291,7 +305,7 @@ boolean EDatabase_pgsql::EDatabase_pgsql::close() {
 	return true;
 }
 
-sp<EBson> EDatabase_pgsql::onExecute(EBson *req) {
+sp<EBson> EDatabase_pgsql::onExecute(EBson *req, EIterable<EInputStream*>* itb) {
 	int fetchsize = req->getInt(EDB_KEY_FETCHSIZE, 4096);
 	char *sql = req->get(EDB_KEY_SQLS "/" EDB_KEY_SQL);
 	es_bson_node_t *param_node = req->find(EDB_KEY_SQLS "/" EDB_KEY_SQL "/" EDB_KEY_PARAMS "/" EDB_KEY_PARAM);
@@ -307,6 +321,7 @@ sp<EBson> EDatabase_pgsql::onExecute(EBson *req) {
 		EString pqsql;
 		int param_count = req->count(EDB_KEY_SQLS "/" EDB_KEY_SQL "/" EDB_KEY_PARAMS "/" EDB_KEY_PARAM);
 		int param_count2 = alterSQLPlaceHolder(sql, pqsql);
+		sp<EIterator<EInputStream*> > iter = itb ? itb->iterator() : null;
 
 		dumpSQL(sql, pqsql.c_str());
 
@@ -318,6 +333,7 @@ sp<EBson> EDatabase_pgsql::onExecute(EBson *req) {
 		char *paramValues[param_count];
 		int	paramLengths[param_count];
 		int	paramFormats[param_count];
+		EA<EByteBuffer*> paramStreams(param_count);
 
 		int index = 0;
 		while (param_node) {
@@ -340,7 +356,14 @@ sp<EBson> EDatabase_pgsql::onExecute(EBson *req) {
 				memcpy(binddata, &converted, datalen);
 			}
 
-			paramValues[index] = (char *)binddata;
+			// stream param, and libpq unsupported send data mode.
+			if (datalen == -1) {
+				paramStreams[index] = make_stream_data(iter);
+				binddata = (char*)paramStreams[index]->data();
+				datalen = paramStreams[index]->size();
+			}
+
+			paramValues[index] = datalen ? (char *)binddata : NULL;
 			paramLengths[index] = datalen;
 			if (stdtype == DB_dtReal || stdtype == DB_dtBLob || stdtype == DB_dtBytes || stdtype == DB_dtLongBinary)
 				paramFormats[index] = 1; //0-character 1-binary
@@ -417,7 +440,7 @@ static void addAffected(EBson* rep, int index, char* affected, const char* errms
 #define AFFECTED_SUCCESS(affected) do { addAffected(rep.get(), sqlIndex, affected, NULL); } while (0);
 #define AFFECTED_FAILURE(count, errmsg) do { addAffected(rep.get(), sqlIndex, count, errmsg); hasFailed = true; } while (0);
 
-sp<EBson> EDatabase_pgsql::onUpdate(EBson *req) {
+sp<EBson> EDatabase_pgsql::onUpdate(EBson *req, EIterable<EInputStream*>* itb) {
 	es_bson_node_t *sql_node = req->find(EDB_KEY_SQLS "/" EDB_KEY_SQL);
 	boolean isResume = req->getByte(EDB_KEY_RESUME, 0);
 	boolean hasFailed = false;
@@ -454,6 +477,7 @@ sp<EBson> EDatabase_pgsql::onUpdate(EBson *req) {
 		} else {
 			EString pqsql;
 			int param_count = alterSQLPlaceHolder(sql, pqsql);
+			sp<EIterator<EInputStream*> > iter = itb ? itb->iterator() : null;
 
 			dumpSQL(sql, pqsql.c_str());
 
@@ -495,10 +519,10 @@ sp<EBson> EDatabase_pgsql::onUpdate(EBson *req) {
 					continue;
 				}
 
-				Oid	paramTypes[param_count];
 				char *paramValues[param_count];
 				int	paramLengths[param_count];
 				int	paramFormats[param_count];
+				EA<EByteBuffer*> paramStreams(param_count);
 
 				int index = 0;
 				while (param_node) {
@@ -520,7 +544,13 @@ sp<EBson> EDatabase_pgsql::onUpdate(EBson *req) {
 						memcpy(binddata, &converted, datalen);
 					}
 
-					paramTypes[index] = CnvtStdToNative(stdtype);
+					// stream param, and libpq unsupported send data mode.
+					if (datalen == -1) {
+						paramStreams[index] = make_stream_data(iter);
+						binddata = (char*)paramStreams[index]->data();
+						datalen = paramStreams[index]->size();
+					}
+
 					paramValues[index] = datalen ? (char *)binddata : NULL;
 					paramLengths[index] = datalen;
 					if (stdtype == DB_dtReal || stdtype == DB_dtBLob || stdtype == DB_dtBytes || stdtype == DB_dtLongBinary)
@@ -764,6 +794,8 @@ sp<EBson> EDatabase_pgsql::onLOBRead(llong oid, EOutputStream *os) {
 			os->write(buf, nbytes);
 			nread += nbytes;
 		}
+		//write end flag
+		os->write(null, 0);
 
 		rep->addLLong(EDB_KEY_READING, nread);
 		rep->addInt(EDB_KEY_ERRCODE, ES_SUCCESS);
@@ -926,8 +958,8 @@ Oid EDatabase_pgsql::CnvtStdToNative(edb_field_type_e eDataType)
 //=============================================================================
 
 extern "C" {
-	ES_DECLARE(efc::edb::EDatabase*) makeDatabase(ELogger* workLogger, ELogger* sqlLogger, const char* clientIP, const char* version)
+	ES_DECLARE(efc::edb::EDatabase*) makeDatabase(efc::edb::EDBProxyInf* proxy)
 	{
-   		return new efc::edb::EDatabase_pgsql(workLogger, sqlLogger, clientIP, version);
+   		return new efc::edb::EDatabase_pgsql(proxy);
 	}
 }

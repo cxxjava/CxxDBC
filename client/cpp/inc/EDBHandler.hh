@@ -13,6 +13,10 @@
 #include "../inc/ESQLException.hh"
 #include "../../../dblib/inc/EDatabase.hh"
 
+#if USE_TARS_CLIENT
+#include "servant/Communicator.h"
+#endif
+
 namespace efc {
 namespace edb {
 
@@ -36,8 +40,8 @@ public:
 
 	void genRequestBase(EBson *req, int type, boolean needPwd=false);
 
-	sp<EBson> executeSQL(EBson *req) THROWS(ESQLException);
-	sp<EBson> updateSQL(EBson *req) THROWS(ESQLException);
+	sp<EBson> executeSQL(EBson *req, EIterable<EInputStream*>* itb) THROWS(ESQLException);
+	sp<EBson> updateSQL(EBson *req, EIterable<EInputStream*>* itb) THROWS(ESQLException);
 	sp<EBson> moreResult(EBson *req) THROWS(ESQLException);
 	sp<EBson> resultFetch(EBson *req) THROWS(ESQLException);
 	sp<EBson> resultClose(EBson *req) THROWS(ESQLException);
@@ -57,7 +61,13 @@ private:
 	EString m_Password;
 
 	sp<EDatabase> database;
+#if USE_TARS_CLIENT
+	Communicator _comm;
+	ServantPrx   _prx;
+#define socket _prx
+#else
 	sp<ESocket> socket;
+#endif
 };
 
 } /* namespace edb */

@@ -9,7 +9,6 @@
 #define EDATABASE_HH_
 
 #include "Efc.hh"
-#include "ELog.hh"
 #include "../../interface/EDatabaseInf.hh"
 
 namespace efc {
@@ -21,8 +20,7 @@ namespace edb {
 
 abstract class EDatabase: virtual public EDatabaseInf {
 public:
-	EDatabase(ELogger* workLogger, ELogger* sqlLogger,
-			const char* clientIP, const char* version);
+	EDatabase(EDBProxyInf* proxy);
 	virtual ~EDatabase();
 
 	virtual sp<EBson> processSQL(EBson *req, void *arg);
@@ -31,9 +29,9 @@ public:
 	virtual int getErrorCode();
 
 	virtual void setErrorMessage(const char* message);
-	virtual const char* getErrorMessage();
+	virtual EString getErrorMessage();
 
-	virtual const char* getProxyVersion();
+	virtual EString getDBType();
 
 	virtual boolean open(const char *database, const char *host, int port,
 			const char *username, const char *password, const char *charset, int timeout) = 0;
@@ -50,17 +48,8 @@ protected:
 
 	void dumpSQL(const char *oldSql, const char *newSql=NULL);
 
-	#define DBLOG(level, msg, t) do { \
-			if (m_WorkLogger != null) { \
-				m_WorkLogger->log(__FILE__, __LINE__, level, msg, t); \
-			} \
-		} while (0);
-
 protected:
-	ELogger* m_WorkLogger; //用于记录一般性错误日志
-	ELogger* m_SqlLogger; //用于记录SQL语句
-	EString m_ClientIP; //访问客户端主机IP
-	EString m_ProxyVersion; //代理服务器版本
+	EDBProxyInf* m_DBProxy; //代理服务器对象
 
 	boolean m_AutoCommit; //是否自动提交事务
 	int m_ErrorCode; //错误代码
@@ -72,8 +61,8 @@ private:
 	sp<EBson> onOpen(EBson *req);
 	sp<EBson> onClose(EBson *req);
 
-	virtual sp<EBson> onExecute(EBson *req) = 0;
-	virtual sp<EBson> onUpdate(EBson *req) = 0;
+	virtual sp<EBson> onExecute(EBson *req, EIterable<EInputStream*>* itb) = 0;
+	virtual sp<EBson> onUpdate(EBson *req, EIterable<EInputStream*>* itb) = 0;
 	virtual sp<EBson> onMoreResult(EBson *req) = 0;
     virtual sp<EBson> onResultFetch(EBson *req) = 0;
     virtual sp<EBson> onResultClose(EBson *req) = 0;

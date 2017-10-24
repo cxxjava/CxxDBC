@@ -254,6 +254,16 @@ static void test_sql_insert() {
 	EConnection conn;
 	conn.connect(DATABASE, HOST, atoi(PORT), USERNAME, PASSWORD);
 
+	//large lob
+	ECommonStatement st(&conn);
+	st.setSql("insert into oracle001 (e,l) values (?,?)");
+	EFileInputStream fis1("/tmp/a.csv");
+	EFileInputStream fis2("/tmp/a.csv");
+	st.bindAsciiStream(&fis1);
+	st.bindBinaryStream(&fis2);
+	st.execute();
+
+	//other
 	EUpdateStatement stmt(&conn);
 	stmt.addBatch("insert into oracle001 (a,b,c,d,e,f,i) values (100000,20,'111212121',1,'中午的太阳火辣辣','2001-01-09 23:12:59','舞起来')");
 	stmt.addBatch("insert into oracle001 (a,b,c,d,e,f,i) values (100000,20,'111212121',1,'中午的太阳火辣辣','1999-12-09','舞起来')");
@@ -449,10 +459,10 @@ void test_db_oracle(void)
 //	test_db_execute();
 //	test_db_update();
 //	test_db_commit();
-	test_db_rollback();
-////	test_large_object();
+//	test_large_object();
 //	test_create_table();
 //	test_sql_insert();
+	test_sql_insert();
 //	test_sql_query();
 //	test_sql_update();
 //	test_sql_func();

@@ -10,6 +10,29 @@
 namespace efc {
 namespace edb {
 
+static int stmt_send_long_data(MYSQL_STMT *stmt,
+        int param_count,
+		MYSQL_BIND *params,
+		byte *paramIsStream,
+        sp<EIterator<EInputStream*> > iter) {
+	char buf[8192];
+	int len;
+	my_bool ret;
+	for (int i=0; i<param_count; i++) {
+		if (params[i].buffer_length == 0 && paramIsStream[i] == 1 && iter->hasNext()) {
+			EInputStream* is = iter->next();
+			while ((len = is->read(buf, sizeof(buf))) > 0) {
+				if ((ret = mysql_stmt_send_long_data(stmt, i, buf, len)) != 0) {
+					return ret;
+				}
+			}
+		}
+	}
+	return 0;
+}
+
+//=============================================================================
+
 EDatabase_mysql::Stmt::~Stmt() {
 	delete fields;
 	delete lengths;
@@ -229,9 +252,8 @@ EDatabase_mysql::~EDatabase_mysql() {
 	close();
 }
 
-EDatabase_mysql::EDatabase_mysql(ELogger* workLogger, ELogger* sqlLogger,
-		const char* clientIP, const char* version) :
-		EDatabase(workLogger, sqlLogger, clientIP, version),
+EDatabase_mysql::EDatabase_mysql(EDBProxyInf* proxy) :
+		EDatabase(proxy),
 		m_Conn(null), m_Stmt(null) {
 }
 
@@ -291,7 +313,7 @@ boolean EDatabase_mysql::close() {
 	return true;
 }
 
-sp<EBson> EDatabase_mysql::onExecute(EBson *req) {
+sp<EBson> EDatabase_mysql::onExecute(EBson *req, EIterable<EInputStream*>* itb) {
 	int fetchsize = req->getInt(EDB_KEY_FETCHSIZE, 4096);
 	char *sql = req->get(EDB_KEY_SQLS "/" EDB_KEY_SQL);
 	es_bson_node_t *param_node = req->find(EDB_KEY_SQLS "/" EDB_KEY_SQL "/" EDB_KEY_PARAMS "/" EDB_KEY_PARAM);
@@ -354,7 +376,8 @@ sp<EBson> EDatabase_mysql::onExecute(EBson *req) {
 
 		MYSQL_BIND params[param_count];
 		memset(params, 0, sizeof(params));
-		my_bool	paramIsnull[param_count];
+		my_bool paramIsnull[param_count];
+		byte paramIsStream[param_count];
 
 		int index = 0;
 		while (param_node) {
@@ -373,7 +396,8 @@ sp<EBson> EDatabase_mysql::onExecute(EBson *req) {
 				memcpy(binddata, &d, datalen);
 			}
 
-			paramIsnull[index] = datalen ? 0 : 1;
+			paramIsnull[index] = (stdtype == DB_dtNull) ? 1 : 0;
+			paramIsStream[index] = (datalen == -1) ? 1 : 0;
 
 			switch (stdtype) {
 			case DB_dtReal:
@@ -389,7 +413,7 @@ sp<EBson> EDatabase_mysql::onExecute(EBson *req) {
 				break;
 			}
 			params[index].buffer = datalen ? binddata : NULL;
-			params[index].buffer_length = datalen;
+			params[index].buffer_length = datalen > 0 ? datalen : 0;
 			params[index].is_null = &paramIsnull[index];
 			params[index].length = 0;
 
@@ -398,13 +422,9 @@ sp<EBson> EDatabase_mysql::onExecute(EBson *req) {
 			index++;
 		}
 
-		if (mysql_stmt_bind_param(stmt, params) != 0) {
-			setErrorMessage(mysql_stmt_error(stmt));
-			mysql_stmt_close(stmt);
-			return null;
-		}
-
-		if (mysql_stmt_execute(stmt) != 0) {
+		if (mysql_stmt_bind_param(stmt, params) != 0
+				|| (itb && stmt_send_long_data(stmt, param_count, params, paramIsStream, itb->iterator()) != 0)
+				|| mysql_stmt_execute(stmt) != 0) {
 			setErrorMessage(mysql_stmt_error(stmt));
 			mysql_stmt_close(stmt);
 			return null;
@@ -425,7 +445,6 @@ sp<EBson> EDatabase_mysql::onExecute(EBson *req) {
 			rep->addLLong(EDB_KEY_AFFECTED, mysql_stmt_affected_rows(stmt));
 
 			return rep;
-
 		} else if (mysql_stmt_errno(stmt) == 0) {
 			sp<EBson> rep = new EBson();
 			rep->addInt(EDB_KEY_ERRCODE, ES_SUCCESS);
@@ -457,7 +476,7 @@ static void addAffected(EBson* rep, int index, int affected, const char* errmsg=
 #define AFFECTED_SUCCESS(affected) do { addAffected(rep.get(), sqlIndex, affected, NULL); } while (0);
 #define AFFECTED_FAILURE(count, errmsg) do { addAffected(rep.get(), sqlIndex, count, errmsg); hasFailed = true; } while (0);
 
-sp<EBson> EDatabase_mysql::onUpdate(EBson *req) {
+sp<EBson> EDatabase_mysql::onUpdate(EBson *req, EIterable<EInputStream*>* itb) {
 	es_bson_node_t *sql_node = req->find(EDB_KEY_SQLS "/" EDB_KEY_SQL);
 	boolean isResume = req->getByte(EDB_KEY_RESUME, 0);
 	boolean hasFailed = false;
@@ -533,6 +552,7 @@ sp<EBson> EDatabase_mysql::onUpdate(EBson *req) {
 				MYSQL_BIND params[param_count];
 				memset(params, 0, sizeof(params));
 				my_bool paramIsnull[param_count];
+				byte paramIsStream[param_count];
 
 				int index = 0;
 				while (param_node) {
@@ -551,7 +571,8 @@ sp<EBson> EDatabase_mysql::onUpdate(EBson *req) {
 						memcpy(binddata, &d, datalen);
 					}
 
-					paramIsnull[index] = datalen ? 0 : 1;
+					paramIsnull[index] = (stdtype == DB_dtNull) ? 1 : 0;
+					paramIsStream[index] = (datalen == -1) ? 1 : 0;
 
 					switch (stdtype) {
 					case DB_dtReal:
@@ -567,7 +588,7 @@ sp<EBson> EDatabase_mysql::onUpdate(EBson *req) {
 						break;
 					}
 					params[index].buffer = datalen ? binddata : NULL;
-					params[index].buffer_length = datalen;
+					params[index].buffer_length = datalen > 0 ? datalen : 0;
 					params[index].is_null = &paramIsnull[index];
 					params[index].length = 0;
 
@@ -578,6 +599,7 @@ sp<EBson> EDatabase_mysql::onUpdate(EBson *req) {
 
 				//affected
 				if (mysql_stmt_bind_param(stmt, params) != 0
+						|| (itb && stmt_send_long_data(stmt, param_count, params, paramIsStream, itb->iterator()) != 0)
 						|| mysql_stmt_execute(stmt) != 0) {
 					AFFECTED_FAILURE(-1,  mysql_stmt_error(stmt));
 				} else {
@@ -809,8 +831,8 @@ edb_field_type_e EDatabase_mysql::CnvtNativeToStd(enum enum_field_types type,
 //=============================================================================
 
 extern "C" {
-	ES_DECLARE(efc::edb::EDatabase*) makeDatabase(ELogger* workLogger, ELogger* sqlLogger, const char* clientIP, const char* version)
+	ES_DECLARE(efc::edb::EDatabase*) makeDatabase(efc::edb::EDBProxyInf* proxy)
 	{
-   		return new efc::edb::EDatabase_mysql(workLogger, sqlLogger, clientIP, version);
+   		return new efc::edb::EDatabase_mysql(proxy);
 	}
 }

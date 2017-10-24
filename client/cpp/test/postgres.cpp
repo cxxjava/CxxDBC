@@ -253,6 +253,17 @@ static void test_sql_insert() {
 	EConnection conn;
 	conn.connect(DATABASE, HOST, atoi(PORT), USERNAME, PASSWORD);
 
+	//large lob
+	ECommonStatement st(&conn);
+	st.setSql("insert into pqsql001 (e,l) values (?,?)");
+	EFileInputStream fis1("/tmp/a.csv");
+	EFileInputStream fis2("/tmp/b.csv");
+	st.bindAsciiStream(&fis1);
+	st.bindBinaryStream(&fis2);
+	st.execute();
+
+	//other
+
 	EUpdateStatement stmt(&conn);
 	stmt.addBatch("insert into pqsql001 (a,b,c,d,e,f,i) values (55555,20,'111212121',1121.3358,'中午的太阳火辣辣','2001-01-09 23:12:59','舞起来')");
 	stmt.addBatch("insert into pqsql001 values (100000,20,'111212121',1985.009,'中午的太阳火辣辣','1999-12-09',33.44432,5544.00329,'舞起来',5555444,true," //k
@@ -421,7 +432,6 @@ void test_db_postgres(void)
 {
 	EConnection::setDefaultDBType("PGSQL");
 
-	test_db_connect();
 //	test_db_execute();
 //	test_db_update();
 //	test_db_commit();
@@ -429,6 +439,7 @@ void test_db_postgres(void)
 //	test_large_object();
 //	test_create_table();
 //	test_sql_insert();
+	test_sql_insert();
 //	test_sql_query();
 //	test_sql_cursor();
 //	test_sql_update();

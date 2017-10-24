@@ -123,6 +123,9 @@ public:
 	virtual EStatement& bindBytes(byte* value, int size);
 	virtual EStatement& bindNull();
 
+	virtual EStatement& bindAsciiStream(EInputStream* is, llong length=-1);
+	virtual EStatement& bindBinaryStream(EInputStream* is, llong length=-1);
+
 	/**
 	 * Gives the JDBC driver a hint as to the number of rows that should
 	 * be fetched from the database when more rows are needed for
@@ -192,6 +195,7 @@ protected:
 	EBson sqlStmt;
 	int sqlCount;
 	int fetchSize;
+	EArrayList<EInputStream*> streamParams;
 	boolean hasRequestHead;
 };
 

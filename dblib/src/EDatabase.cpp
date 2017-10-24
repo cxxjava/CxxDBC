@@ -15,12 +15,8 @@ EDatabase::~EDatabase() {
 	//
 }
 
-EDatabase::EDatabase(ELogger* workLogger, ELogger* sqlLogger,
-		const char* clientIP, const char* version) :
-		m_WorkLogger(workLogger),
-		m_SqlLogger(sqlLogger),
-		m_ClientIP(clientIP),
-		m_ProxyVersion(version),
+EDatabase::EDatabase(EDBProxyInf* proxy) :
+		m_DBProxy(proxy),
 		m_AutoCommit(true),
 		m_ErrorCode(0),
 		m_CursorID(0) {
@@ -41,11 +37,17 @@ sp<EBson> EDatabase::processSQL(EBson *req, void *arg) {
 		rep = onClose(req);
 		break;
 	case DB_SQL_EXECUTE:
-		rep = onExecute(req);
+	{
+		EIterable<EInputStream*>* itb = (EIterable<EInputStream*>*)arg;
+		rep = onExecute(req, itb);
 		break;
+	}
 	case DB_SQL_UPDATE:
-		rep = onUpdate(req);
+	{
+		EIterable<EInputStream*>* itb = (EIterable<EInputStream*>*)arg;
+		rep = onUpdate(req, itb);
 		break;
+	}
 	case DB_SQL_MORE_RESULT:
 		rep = onMoreResult(req);
 		break;
@@ -128,7 +130,7 @@ sp<EBson> EDatabase::onOpen(EBson *req) {
 
 	sp<EBson> rep = new EBson();
 	rep->addInt(EDB_KEY_ERRCODE, ES_SUCCESS);
-	rep->add(EDB_KEY_VERSION, getProxyVersion());
+	rep->add(EDB_KEY_VERSION, m_DBProxy ? m_DBProxy->getProxyVersion().c_str(): null);
 	rep->add(EDB_KEY_DBTYPE, dbtype().c_str());
 	rep->add(EDB_KEY_DBVERSION, dbversion().c_str());
 	return rep;
@@ -149,7 +151,7 @@ sp<EBson> EDatabase::doSavepoint(EBson *req, EString& sql) {
 	//转换请求为onUpdate(req)
 	req->setInt(EDB_KEY_MSGTYPE, DB_SQL_UPDATE);
 	req->add(EDB_KEY_SQLS "/" EDB_KEY_SQL, sql.c_str());
-	return onUpdate(req);
+	return onUpdate(req, null);
 }
 
 sp<EBson> EDatabase::setSavepoint(EBson *req) {
@@ -191,13 +193,13 @@ sp<EBson> EDatabase::genRspCommSuccess() {
 sp<EBson> EDatabase::genRspCommFailure() {
 	sp<EBson> rep = new EBson();
 	rep->addInt(EDB_KEY_ERRCODE, ES_FAILURE);
-	rep->add(EDB_KEY_ERRMSG, getErrorMessage());
+	rep->add(EDB_KEY_ERRMSG, m_ErrorMessage.c_str());
 	return rep;
 }
 
 void EDatabase::dumpSQL(const char *oldSql, const char *newSql) {
-	if (m_SqlLogger != null && (oldSql || newSql)) {
-		m_SqlLogger->log(null, -1, ELogger::LEVEL_INFO, newSql ? newSql : oldSql, null);
+	if (m_DBProxy != null && (oldSql || newSql)) {
+		m_DBProxy->dumpSQL(oldSql, newSql);
 	}
 }
 
@@ -213,12 +215,12 @@ void EDatabase::setErrorMessage(const char* message) {
 	m_ErrorMessage = message;
 }
 
-const char* EDatabase::getErrorMessage() {
-	return m_ErrorMessage.c_str();
+EString EDatabase::getErrorMessage() {
+	return m_ErrorMessage;
 }
 
-const char* EDatabase::getProxyVersion() {
-	return m_ProxyVersion.c_str();
+EString EDatabase::getDBType() {
+	return dbtype();
 }
 
 #ifdef DEBUG

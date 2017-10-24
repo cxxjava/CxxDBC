@@ -281,6 +281,21 @@ static CS_RETCODE create_prepare_stmt(CS_COMMAND* cmd, char* name, char* sql) {
 	return CS_SUCCEED;
 }
 
+static EByteBuffer* make_stream_data(sp<EIterator<EInputStream*> > iter) {
+	ES_ASSERT(iter != null);
+	char buf[8192];
+	int len;
+	if (iter->hasNext()) {
+		EInputStream* is = iter->next();
+		EByteBuffer* bb = new EByteBuffer();
+		while ((len = is->read(buf, sizeof(buf))) > 0) {
+			bb->append(buf, len);
+		}
+		return bb;
+	}
+	return null;
+}
+
 //=============================================================================
 
 EDatabase_freetds::Result::~Result() {
@@ -544,9 +559,8 @@ EDatabase_freetds::~EDatabase_freetds() {
 	close();
 }
 
-EDatabase_freetds::EDatabase_freetds(ELogger* workLogger, ELogger* sqlLogger,
-		const char* clientIP, const char* version) :
-		EDatabase(workLogger, sqlLogger, clientIP, version),
+EDatabase_freetds::EDatabase_freetds(EDBProxyInf* proxy) :
+		EDatabase(proxy),
 		m_Conn(null), m_Cmd(null) {
 }
 
@@ -706,7 +720,7 @@ boolean EDatabase_freetds::EDatabase_freetds::close() {
 	return true;
 }
 
-sp<EBson> EDatabase_freetds::onExecute(EBson *req) {
+sp<EBson> EDatabase_freetds::onExecute(EBson *req, EIterable<EInputStream*>* itb) {
 	int fetchsize = req->getInt(EDB_KEY_FETCHSIZE, 4096);
 	char *sql = req->get(EDB_KEY_SQLS "/" EDB_KEY_SQL);
 	es_bson_node_t *param_node = req->find(EDB_KEY_SQLS "/" EDB_KEY_SQL "/" EDB_KEY_PARAMS "/" EDB_KEY_PARAM);
@@ -729,6 +743,7 @@ sp<EBson> EDatabase_freetds::onExecute(EBson *req) {
 
 	} else {
 
+		sp<EIterator<EInputStream*> > iter = itb ? itb->iterator() : null;
 		int param_count = req->count(EDB_KEY_SQLS "/" EDB_KEY_SQL "/" EDB_KEY_PARAMS "/" EDB_KEY_PARAM);
 		int param_count2 = tds_count_placeholders(sql);
 
@@ -747,6 +762,7 @@ sp<EBson> EDatabase_freetds::onExecute(EBson *req) {
 		int	paramLengths[param_count];
 		CS_DATAFMT paramFormats[param_count];
 		memset(paramFormats, 0, sizeof(paramFormats));
+		EA<EByteBuffer*> paramStreams(param_count);
 
 #if 0
 		ret = ct_dynamic(m_Cmd, CS_DESCRIBE_INPUT, PREPARE_STMT_NAME, CS_NULLTERM, NULL, CS_UNUSED);
@@ -792,6 +808,13 @@ sp<EBson> EDatabase_freetds::onExecute(EBson *req) {
 				memcpy(binddata, &d, datalen);
 			}
 
+			// stream param, and libpq unsupported send data mode.
+			if (datalen == -1) {
+				paramStreams[index] = make_stream_data(iter);
+				binddata = (char*)paramStreams[index]->data();
+				datalen = paramStreams[index]->size();
+			}
+
 			paramValues[index] = (char *)binddata;
 			paramLengths[index] = datalen;
 
@@ -803,12 +826,8 @@ sp<EBson> EDatabase_freetds::onExecute(EBson *req) {
 			switch (paramFormats[index].datatype) {
 			case CS_IMAGE_TYPE:
 			case CS_TEXT_TYPE:
-#ifdef DEBUG_SEND_DATA
-				ret = ct_setparam(m_Cmd, &paramFormats[index], NULL, 0, 0);
-#else
 				ret = ct_param(m_Cmd, &paramFormats[index], (CS_VOID *)paramValues[index],
 						paramLengths[index], 0);
-#endif
 				break;
 			case CS_BIT_TYPE: {
 				EString s((char*)paramValues[index], 0, paramLengths[index]);
@@ -884,32 +903,6 @@ sp<EBson> EDatabase_freetds::onExecute(EBson *req) {
 			index++;
 		}
 
-#ifdef DEBUG_SEND_DATA
-		ret = ct_command(m_Cmd, CS_SEND_DATA_CMD, NULL, CS_UNUSED, CS_COLUMN_DATA);
-		RETURN_NULL_IF(ret, "");
-
-		CS_IODESC iodesc = {0};
-		iodesc.total_txtlen = 800;
-		iodesc.log_on_update = CS_TRUE;
-		iodesc.textptrlen = 10;
-
-		ret = ct_data_info(m_Cmd, CS_SET, CS_UNUSED, &iodesc);
-		RETURN_NULL_IF(ret, "");
-
-		for (int i=0; i<param_count; i++) {
-			if (paramFormats[i].datatype == CS_IMAGE_TYPE || paramFormats[i].datatype == CS_TEXT_TYPE) {
-				ret = ct_send_data(m_Cmd, (CS_VOID *)paramValues[i], paramLengths[i]);
-				RETURN_NULL_IF(ret, "");
-
-				/**
-				 * End with 0 bytes to indicate the end of current data.
-				 */
-				ret = ct_send_data(m_Cmd, (CS_VOID *)"", 0);
-				RETURN_NULL_IF(ret, "");
-			}
-		}
-#endif
-
 		/**
 		 * Insure that all the data is sent to the server.
 		 */
@@ -966,7 +959,7 @@ static void addAffected(EBson* rep, int index, int affected, const char* errmsg=
 #define AFFECTED_SUCCESS(affected) do { addAffected(rep.get(), sqlIndex, affected, NULL); } while (0);
 #define AFFECTED_FAILURE(count, errmsg) do { addAffected(rep.get(), sqlIndex, count, errmsg); hasFailed = true; } while (0);
 
-sp<EBson> EDatabase_freetds::onUpdate(EBson *req) {
+sp<EBson> EDatabase_freetds::onUpdate(EBson *req, EIterable<EInputStream*>* itb) {
 	es_bson_node_t *sql_node = req->find(EDB_KEY_SQLS "/" EDB_KEY_SQL);
 	boolean isResume = req->getByte(EDB_KEY_RESUME, 0);
 	boolean hasFailed = false;
@@ -999,11 +992,12 @@ sp<EBson> EDatabase_freetds::onUpdate(EBson *req) {
 				AFFECTED_SUCCESS(rowcount);
 			} else {
 				setErrorMessageDiag();
-				AFFECTED_FAILURE(-1, getErrorMessage());
+				AFFECTED_FAILURE(-1, getErrorMessage().c_str());
 			}
 
 		} else { //!
 
+			sp<EIterator<EInputStream*> > iter = itb ? itb->iterator() : null;
 			int param_count = tds_count_placeholders(sql);
 			int batch_count = EBson::childCount(sql_node, NULL);
 			boolean prepared = false;
@@ -1032,7 +1026,7 @@ sp<EBson> EDatabase_freetds::onUpdate(EBson *req) {
 			if (ret != CS_SUCCEED) {
 				setErrorMessageDiag();
 				sqlIndex++;
-				AFFECTED_FAILURE(-batch_count, getErrorMessage());
+				AFFECTED_FAILURE(-batch_count, getErrorMessage().c_str());
 				sqlIndex += (batch_count - 1);
 				sql_node = sql_node->next; //next
 				continue;
@@ -1070,6 +1064,7 @@ sp<EBson> EDatabase_freetds::onUpdate(EBson *req) {
 				int	paramLengths[param_count];
 				CS_DATAFMT paramFormats[param_count];
 				memset(paramFormats, 0, sizeof(paramFormats));
+				EA<EByteBuffer*> paramStreams(param_count);
 
 				int index = 0;
 				while (param_node) {
@@ -1086,6 +1081,13 @@ sp<EBson> EDatabase_freetds::onUpdate(EBson *req) {
 						llong l = eso_array2llong((es_byte_t*)binddata, datalen);
 						double d = EDouble::llongBitsToDouble(l);
 						memcpy(binddata, &d, datalen);
+					}
+
+					// stream param, and libpq unsupported send data mode.
+					if (datalen == -1) {
+						paramStreams[index] = make_stream_data(iter);
+						binddata = (char*)paramStreams[index]->data();
+						datalen = paramStreams[index]->size();
 					}
 
 					paramValues[index] = (char *)binddata;
@@ -1186,13 +1188,13 @@ sp<EBson> EDatabase_freetds::onUpdate(EBson *req) {
 						}
 						default: {
 							setErrorMessageDiag();
-							AFFECTED_FAILURE(-1, getErrorMessage());
+							AFFECTED_FAILURE(-1, getErrorMessage().c_str());
 							break;
 						}
 					}
 				} else {
 					setErrorMessageDiag();
-					AFFECTED_FAILURE(-1,  getErrorMessage());
+					AFFECTED_FAILURE(-1,  getErrorMessage().c_str());
 				}
 
 				//next params
@@ -1540,8 +1542,8 @@ CS_INT EDatabase_freetds::CnvtStdToNative(edb_field_type_e eDataType) {
 //=============================================================================
 
 extern "C" {
-	ES_DECLARE(efc::edb::EDatabase*) makeDatabase(ELogger* workLogger, ELogger* sqlLogger, const char* clientIP, const char* version)
+	ES_DECLARE(efc::edb::EDatabase*) makeDatabase(efc::edb::EDBProxyInf* proxy)
 	{
-   		return new efc::edb::EDatabase_freetds(workLogger, sqlLogger, clientIP, version);
+   		return new efc::edb::EDatabase_freetds(proxy);
 	}
 }

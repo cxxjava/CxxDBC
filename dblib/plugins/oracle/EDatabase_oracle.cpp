@@ -16,6 +16,21 @@ using namespace std;
 namespace efc {
 namespace edb {
 
+static void write_stream_data(sp<EIterator<EInputStream*> > iter, Stream *im) {
+	ES_ASSERT(iter != null);
+	char buf[8192];
+	int len;
+	if (iter->hasNext()) {
+		EInputStream* is = iter->next();
+		while ((len = is->read(buf, sizeof(buf))) > 0) {
+			im->writeBuffer(buf, len);
+		}
+		im->writeLastBuffer(NULL, 0);
+	}
+}
+
+//=============================================================================
+
 EDatabase_oracle::Result::~Result() {
 	clear();
 }
@@ -298,9 +313,8 @@ EDatabase_oracle::~EDatabase_oracle() {
 	close();
 }
 
-EDatabase_oracle::EDatabase_oracle(ELogger* workLogger, ELogger* sqlLogger,
-		const char* clientIP, const char* version) :
-		EDatabase(workLogger, sqlLogger, clientIP, version),
+EDatabase_oracle::EDatabase_oracle(EDBProxyInf* proxy) :
+		EDatabase(proxy),
 		m_Env(null), m_Conn(null), m_Stmt(null) {
 }
 
@@ -373,7 +387,7 @@ boolean EDatabase_oracle::EDatabase_oracle::close() {
 	return true;
 }
 
-sp<EBson> EDatabase_oracle::onExecute(EBson *req) {
+sp<EBson> EDatabase_oracle::onExecute(EBson *req, EIterable<EInputStream*>* itb) {
 	int fetchsize = req->getInt(EDB_KEY_FETCHSIZE, 4096);
 	char *sql = req->get(EDB_KEY_SQLS "/" EDB_KEY_SQL);
 	es_bson_node_t *param_node = req->find(EDB_KEY_SQLS "/" EDB_KEY_SQL "/" EDB_KEY_PARAMS "/" EDB_KEY_PARAM);
@@ -394,9 +408,9 @@ sp<EBson> EDatabase_oracle::onExecute(EBson *req) {
 
 		} else {
 			EString orasql;
-
 			int param_count = req->count(EDB_KEY_SQLS "/" EDB_KEY_SQL "/" EDB_KEY_PARAMS "/" EDB_KEY_PARAM);
 			int param_count2 = alterSQLPlaceHolder(sql, orasql);
+			sp<EIterator<EInputStream*> > iter = itb ? itb->iterator() : null;
 
 			dumpSQL(sql, orasql.c_str());
 
@@ -496,11 +510,16 @@ sp<EBson> EDatabase_oracle::onExecute(EBson *req) {
 				for (int i=0; i<param_count; i++) {
 					if (paramsTypes[i] == DB_dtReal) {
 						continue;
+					} else if (paramLengths[i] == -1) {
+						Stream *im = m_Stmt->getStream(i+1);
+						write_stream_data(iter, im);
+						m_Stmt->closeStream(im);
+					} else {
+						Stream *im = m_Stmt->getStream(i+1);
+						im->writeBuffer(paramValues[i], paramLengths[i]);
+						im->writeLastBuffer(NULL, 0);
+						m_Stmt->closeStream(im);
 					}
-					Stream *im = m_Stmt->getStream(i+1);
-					im->writeBuffer(paramValues[i], paramLengths[i]);
-					im->writeLastBuffer(NULL, 0);
-					m_Stmt->closeStream(im);
 				}
 			}
 
@@ -577,7 +596,7 @@ static void addAffected(EBson* rep, int index, char* affected, const char* errms
 #define AFFECTED_SUCCESS(affected) do { addAffected(rep.get(), sqlIndex, affected, NULL); } while (0);
 #define AFFECTED_FAILURE(count, errmsg) do { addAffected(rep.get(), sqlIndex, count, errmsg); hasFailed = true; } while (0);
 
-sp<EBson> EDatabase_oracle::onUpdate(EBson *req) {
+sp<EBson> EDatabase_oracle::onUpdate(EBson *req, EIterable<EInputStream*>* itb) {
 	es_bson_node_t *sql_node = req->find(EDB_KEY_SQLS "/" EDB_KEY_SQL);
 	boolean isResume = req->getByte(EDB_KEY_RESUME, 0);
 	boolean hasFailed = false;
@@ -620,6 +639,7 @@ sp<EBson> EDatabase_oracle::onUpdate(EBson *req) {
 		} else {
 			EString orasql;
 			int param_count = alterSQLPlaceHolder(sql, orasql);
+			sp<EIterator<EInputStream*> > iter = itb ? itb->iterator() : null;
 
 			dumpSQL(sql, orasql.c_str());
 
@@ -683,11 +703,16 @@ sp<EBson> EDatabase_oracle::onUpdate(EBson *req) {
 					for (int i=0; i<param_count; i++) {
 						if (paramsTypes[i] == DB_dtReal) {
 							continue;
+						} else if (paramLengths[i] == -1) {
+							Stream *im = m_Stmt->getStream(i+1);
+							write_stream_data(iter, im);
+							m_Stmt->closeStream(im);
+						} else {
+							Stream *im = m_Stmt->getStream(i+1);
+							im->writeBuffer(paramValues[i], paramLengths[i]);
+							im->writeLastBuffer(NULL, 0);
+							m_Stmt->closeStream(im);
 						}
-						Stream *im = m_Stmt->getStream(i+1);
-						im->writeBuffer(paramValues[i], paramLengths[i]);
-						im->writeLastBuffer(NULL, 0);
-						m_Stmt->closeStream(im);
 					}
 
 					//status
@@ -815,27 +840,18 @@ sp<EBson> EDatabase_oracle::setAutoCommit(boolean autoCommit) {
 }
 
 sp<EBson> EDatabase_oracle::onLOBCreate() {
-	sp<EBson> rep = new EBson();
-
-	//
-
-	return rep;
+	setErrorMessage("unsupported");
+	return genRspCommFailure();
 }
 
 sp<EBson> EDatabase_oracle::onLOBWrite(llong oid, EInputStream *is) {
-	sp<EBson> rep = new EBson();
-
-	//
-
-	return rep;
+	setErrorMessage("unsupported");
+	return genRspCommFailure();
 }
 
 sp<EBson> EDatabase_oracle::onLOBRead(llong oid, EOutputStream *os) {
-	sp<EBson> rep = new EBson();
-
-	//
-
-	return rep;
+	setErrorMessage("unsupported");
+	return genRspCommFailure();
 }
 
 //@see: https://docs.oracle.com/cd/B19306_01/appdev.102/b14250/oci03typ.htm
@@ -985,8 +1001,8 @@ int EDatabase_oracle::CnvtStdToNative(edb_field_type_e eDataType)
 //=============================================================================
 
 extern "C" {
-	ES_DECLARE(efc::edb::EDatabase*) makeDatabase(ELogger* workLogger, ELogger* sqlLogger, const char* clientIP, const char* version)
+	ES_DECLARE(efc::edb::EDatabase*) makeDatabase(efc::edb::EDBProxyInf* proxy)
 	{
-   		return new efc::edb::EDatabase_oracle(workLogger, sqlLogger, clientIP, version);
+   		return new efc::edb::EDatabase_oracle(proxy);
 	}
 }

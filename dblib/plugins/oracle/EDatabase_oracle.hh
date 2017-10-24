@@ -26,8 +26,7 @@ class EDatabase_oracle: public EDatabase {
 public:
 	virtual ~EDatabase_oracle();
 
-	EDatabase_oracle(ELogger* workLogger, ELogger* sqlLogger,
-			const char* clientIP, const char* version);
+	EDatabase_oracle(EDBProxyInf* proxy);
 private:
 	Environment *m_Env;
 	Connection *m_Conn;
@@ -68,8 +67,8 @@ private:
 	sp<Result> m_Result;
 	
 private:
-	virtual sp<EBson> onExecute(EBson *req);
-	virtual sp<EBson> onUpdate(EBson *req);
+	virtual sp<EBson> onExecute(EBson *req, EIterable<EInputStream*>* itb);
+	virtual sp<EBson> onUpdate(EBson *req, EIterable<EInputStream*>* itb);
 	virtual sp<EBson> onMoreResult(EBson *req);
 	virtual sp<EBson> onResultFetch(EBson *req);
 	virtual sp<EBson> onResultClose(EBson *req);

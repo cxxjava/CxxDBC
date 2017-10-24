@@ -39,7 +39,7 @@ EStatement& ECommonStatement::execute(void) {
 	sqlStmt.setInt(EDB_KEY_FETCHSIZE, getFetchSize());
 
 	//请求并获取结果
-	sp<EBson> rep = connection->dbHandler.executeSQL(&sqlStmt);
+	sp<EBson> rep = connection->dbHandler.executeSQL(&sqlStmt, &streamParams);
 
 	if (!rep || rep->getInt(EDB_KEY_ERRCODE) != ES_SUCCESS) {
 		throw ESQLException(__FILE__, __LINE__, rep->getString(EDB_KEY_ERRMSG).c_str());

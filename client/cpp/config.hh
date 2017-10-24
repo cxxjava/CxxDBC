@@ -14,4 +14,9 @@
  */
 #define EDB_CLIENT_STATIC  0
 
+/**
+ * 其他模式时，是否为tars服务客户端
+ */
+#define USE_TARS_CLIENT 1
+
 #endif /* CONFIG_HH_ */

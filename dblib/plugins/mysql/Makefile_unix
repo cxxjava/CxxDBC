@@ -37,18 +37,12 @@ $(info LIBDIR=$(LIBDIR))
 $(info SHAREDLIB=$(SHAREDLIB))
 
 
-INCLUDEDIR = -I../../../../comm/ \
-	-I../../../../libc/inc \
-	-I../../../../efc/ \
-	-I../../../../efc/inc \
-	-I../../../../efc/inc/concurrent \
-	-I../../../../efc/inc/cpp11 \
-	-I../../../../efc/nio/inc \
-	-I../../../../elog/ \
+INCLUDEDIR = -I../../../../efc/ \
+	-I../../../../CxxJDK/efc \
 	-I/usr/local/Cellar/openssl/1.0.2g/include
 
 LIBDIRS = -L../../../../efc/lib/$(LIBDIR) \
-	-L../../../../libc/lib/$(LIBDIR) \
+	-L../../../../CxxJDK/lib/$(LIBDIR) \
 	-L./connector/lib \
 
 APPENDLIB = 

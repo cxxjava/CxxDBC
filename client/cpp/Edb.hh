@@ -8,7 +8,7 @@
 #ifndef EDB_HH_
 #define EDB_HH_
 
-#define EDB_VERSION "0.1.0"
+#define EDB_VERSION "0.2.0"
 
 #include "Efc.hh"
 

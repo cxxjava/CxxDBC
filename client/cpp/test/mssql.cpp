@@ -262,6 +262,16 @@ static void test_sql_insert() {
 	EConnection conn;
 	conn.connect(DATABASE, HOST, atoi(PORT), USERNAME, PASSWORD);
 
+	//large lob
+	ECommonStatement st(&conn);
+	st.setSql("insert into mssql001 (d, e, l) values (1, ?, ?)");
+	EFileInputStream fis1("/tmp/a.csv");
+	EFileInputStream fis2("/tmp/a.csv");
+	st.bindAsciiStream(&fis1);
+	st.bindBinaryStream(&fis2);
+	st.execute();
+
+	//other
 	EUpdateStatement stmt(&conn);
 	stmt.addBatch("insert into mssql001 (a,b,c,d,e,f,g,h,i,j,k,l,m) "
 	"values (100000,20,0x616161616161,1,'中午的太阳火辣辣','2005-01-09 23:12:59',21212.4343,3333.01,"
@@ -434,10 +444,10 @@ void test_db_mssql(void)
 //	test_db_execute();
 //	test_db_update();
 //	test_db_commit();
-	test_db_rollback();
-////	test_large_object();
+//	test_large_object();
 //	test_create_table();
 //	test_sql_insert();
+	test_sql_insert();
 //	test_sql_query();
 //	test_sql_update();
 //	test_sql_func();

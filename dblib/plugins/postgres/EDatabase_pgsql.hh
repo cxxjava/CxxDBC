@@ -26,8 +26,7 @@ class EDatabase_pgsql: public EDatabase {
 public:
 	virtual ~EDatabase_pgsql();
 
-	EDatabase_pgsql(ELogger* workLogger, ELogger* sqlLogger,
-			const char* clientIP, const char* version);
+	EDatabase_pgsql(EDBProxyInf* proxy);
 private:
 	PGconn *m_Conn;
 	class Result: public EObject {
@@ -62,8 +61,8 @@ private:
 	sp<Result> m_Result;
 	
 private:
-	virtual sp<EBson> onExecute(EBson *req);
-	virtual sp<EBson> onUpdate(EBson *req);
+	virtual sp<EBson> onExecute(EBson *req, EIterable<EInputStream*>* itb);
+	virtual sp<EBson> onUpdate(EBson *req, EIterable<EInputStream*>* itb);
 	virtual sp<EBson> onMoreResult(EBson *req);
 	virtual sp<EBson> onResultFetch(EBson *req);
 	virtual sp<EBson> onResultClose(EBson *req);

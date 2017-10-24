@@ -5,6 +5,7 @@
  *      Author: cxxjava@163.com
  */
 
+#include "EUtils.hh"
 #include "../inc/EStatement.hh"
 #include "../inc/EConnection.hh"
 
@@ -67,6 +68,7 @@ EStatement& EStatement::setSqlFormat(const char *sqlfmt, ...) {
 EStatement& EStatement::clearSql() {
 	sqlStmt.clear();
 	sqlCount = 0;
+	streamParams.clear();
 	hasRequestHead = false;
 	return *this;
 }
@@ -205,6 +207,36 @@ EStatement& EStatement::bindBytes(byte* value, int size) {
 
 EStatement& EStatement::bindNull() {
 	return bind(DB_dtNull, NULL, 0);
+}
+
+EStatement& EStatement::bindAsciiStream(EInputStream* is, llong length) {
+	EByteArrayOutputStream baos;
+	EDataOutputStream dos(&baos);
+	dos.writeInt(DB_dtCLob);
+	dos.writeInt(EInteger::MAX_VALUE); //!
+	dos.writeInt(-1); //!
+
+	//param
+	sqlStmt.add(EDB_KEY_SQLS "/" EDB_KEY_SQL "/" EDB_KEY_PARAMS "/" EDB_KEY_PARAM, baos.data(), baos.size());
+
+	streamParams.add(new EBoundedInputStream(is, length));
+
+	return *this;
+}
+
+EStatement& EStatement::bindBinaryStream(EInputStream* is, llong length) {
+	EByteArrayOutputStream baos;
+	EDataOutputStream dos(&baos);
+	dos.writeInt(DB_dtBLob);
+	dos.writeInt(EInteger::MAX_VALUE); //!
+	dos.writeInt(-1); //!
+
+	//param
+	sqlStmt.add(EDB_KEY_SQLS "/" EDB_KEY_SQL "/" EDB_KEY_PARAMS "/" EDB_KEY_PARAM, baos.data(), baos.size());
+
+	streamParams.add(new EBoundedInputStream(is, length));
+
+	return *this;
 }
 
 void EStatement::setFetchSize(int rows) {

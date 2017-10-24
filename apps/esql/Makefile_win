@@ -1,0 +1,53 @@
+################OPTION###################
+
+CXXJDK_NAME = CxxJDK
+
+CCOMPILE = cl.exe
+LINK = link.exe
+
+ESQL = esql.exe
+
+COMPILEOPTION = -c /Zi /nologo /W3 /WX- /O2 /Oy- /D "WIN32" /D "NDEBUG" /D "_CONSOLE" /Gm- /EHsc /MD /GS /fp:precise /Zc:wchar_t /Zc:forScope /Gd /analyze- -D_WINDOWS -D_MBCS -D_LIB -DES_DECLARE_EXPORT -D__MAIN__
+
+LINKOPTION = /NOLOGO /SUBSYSTEM:CONSOLE /OPT:REF /OPT:ICF /TLBID:1 /DYNAMICBASE /NXCOMPAT /MACHINE:X86
+
+INCLUDEDIR = \
+	-I..\..\..\efc \
+	-I..\..\..\CxxJDK\efc \
+	-I..\..\client\cpp \
+	-IC:\OpenSSL-Win32\include
+
+LIBDIRS = /LIBPATH:..\..\..\$(CXXJDK_NAME)\lib\win\ eso16.lib efc16.lib "Ws2_32.lib" "kernel32.lib" "user32.lib" "gdi32.lib" "winspool.lib" "comdlg32.lib" "advapi32.lib" "shell32.lib" "ole32.lib" "oleaut32.lib" "uuid.lib" "odbc32.lib" "odbccp32.lib"
+
+BASE_OBJS = \
+	..\..\client\cpp\src\ECommonStatement.obj \
+	..\..\client\cpp\src\EConnection.obj \
+	..\..\client\cpp\src\EConnectionPool.obj \
+	..\..\client\cpp\src\EDatabaseMetaData.obj \
+	..\..\client\cpp\src\EDBHandler.obj \
+	..\..\client\cpp\src\EResultSet.obj \
+	..\..\client\cpp\src\EResultSetMetaData.obj \
+	..\..\client\cpp\src\ESavepoint.obj \
+	..\..\client\cpp\src\EStatement.obj \
+	..\..\client\cpp\src\EUpdateStatement.obj \
+	..\..\..\$(CXXJDK_NAME)\utils\src\EBoundedInputStream.obj \
+
+ESQL_OBJS = esql.obj \
+
+$(ESQL): $(BASE_OBJS) $(ESQL_OBJS) 
+	$(LINK) $(LINKOPTION) /out:$(ESQL) $(LIBDIRS) $(BASE_OBJS) $(ESQL_OBJS) crypt32.lib C:\OpenSSL-Win32\lib\VC\static\libeay32MD.lib C:\OpenSSL-Win32\lib\VC\static\ssleay32MD.lib
+
+clean: 
+	del $(BASE_OBJS)
+	del $(ESQL_OBJS) 
+
+all: clean $(ESQL) clean
+.PRECIOUS:%.cpp %.c %.C
+.SUFFIXES:
+.SUFFIXES:  .cpp .obj
+
+.cpp.obj:
+	$(CCOMPILE) -c -Fo$* -o $*.obj $(COMPILEOPTION) $(INCLUDEDIR) $*.cpp
+
+.c.o:
+	$(CCOMPILE) -c -Fo$* -o $*.obj $(CCOMPILEOPTION) $(INCLUDEDIR) $*.c

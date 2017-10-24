@@ -25,8 +25,8 @@ MAIN_IMPL(testedb) {
 		do {
 			LOG("===========begin=============");
 
+			test_db_mysql();
 //			test_db_mysql();
-			test_db_postgres();
 //			test_db_oracle();
 //			test_db_mssql();
 //			test_db_sybase();

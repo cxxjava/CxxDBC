@@ -7,6 +7,7 @@
 
 #include "es_main.h"
 #include "ENaf.hh"
+#include "EUtils.hh"
 #include "../../interface/EDBInterface.h"
 #include "../../dblib/inc/EDatabase.hh"
 
@@ -17,11 +18,13 @@ using namespace efc::edb;
 #define DEFAULT_CONNECT_PORT 6633
 #define DEFAULT_CONNECT_SSL_PORT 6643
 
+#define DBLIB_STATIC 0
+
 #define LOG(fmt,...) ESystem::out->println(fmt, ##__VA_ARGS__)
 
 extern "C" {
-typedef efc::edb::EDatabase* (make_database_t)(ELogger* workLogger,
-		ELogger* sqlLogger, const char* clientIP, const char* version);
+extern efc::edb::EDatabase* makeDatabase(EDBProxyInf* proxy);
+typedef efc::edb::EDatabase* (make_database_t)(EDBProxyInf* proxy);
 }
 
 static sp<ELogger> wlogger;
@@ -219,7 +222,11 @@ public:
 				if (!handle) {
 					throw EFileNotFoundException(__FILE__, __LINE__, dsofile.c_str());
 				}
+#if DBLIB_STATIC
+				make_database_t* func = (make_database_t*)makeDatabase;
+#else
 				make_database_t* func = (make_database_t*)eso_dso_sym(handle, "makeDatabase");
+#endif
 				if (!func) {
 					eso_dso_unload(&handle);
 					throw ERuntimeException(__FILE__, __LINE__, "makeDatabase");
@@ -254,11 +261,7 @@ public:
 			while (iter->hasNext()) {
 				VirtualDB* vdb = iter->next();
 
-				//LOG("dbname=%s, ip=%s, port=%d, username=%s, password=%s, charset=%s",
-				//		       vdb->database.c_str(), vdb->host.c_str(), vdb->port,
-				//		       vdb->username.c_str(), vdb->password.c_str(), vdb->clientEncoding.c_str());
-
-				sp<EDatabase> db = getDatabase(vdb->dbType.c_str(), null, null);
+				sp<EDatabase> db = getDatabase(vdb->dbType.c_str(), null);
 				if (db == null) {
 					continue;
 				}
@@ -269,19 +272,19 @@ public:
 						vdb->connectTimeout);
 				if (!r) {
 					EString msg = EString::formatOf("open database [%s] failed: (%s)",
-							   vdb->alias_dbname.c_str(), db->getErrorMessage());
+							   vdb->alias_dbname.c_str(), db->getErrorMessage().c_str());
 					throw EException(__FILE__, __LINE__, msg.c_str());
 				}
 				LOG("virtual database [%s] connect success.", vdb->alias_dbname.c_str());
 			}
 		}}
 	}
-	sp<EDatabase> getDatabase(const char* dbtype, const char* clientIP, const char* version) {
+	sp<EDatabase> getDatabase(const char* dbtype, EDBProxyInf* proxy) {
 		EString key(dbtype);
 		SoHandle *sh = handles.get(&key);
 		if (!sh) return null;
 		make_database_t* func = sh->func;
-		return func(wlogger.get(), slogger.get(), clientIP, version);
+		return func(proxy);
 	}
 private:
 	struct SoHandle: public EObject {
@@ -292,7 +295,141 @@ private:
 	EHashMap<EString*,SoHandle*> handles;
 };
 
-class DBProxyServer: public ESocketAcceptor {
+static edb_pkg_head_t read_pkg_head(EInputStream* is) {
+	edb_pkg_head_t pkg_head;
+	char *b = (char*)&pkg_head;
+	int len = sizeof(edb_pkg_head_t);
+	int n = 0;
+
+	while (n < len) {
+		int count = is->read(b + n, len - n);
+		if (count < 0)
+			throw EEOFEXCEPTION;
+		n += count;
+	}
+
+	//check falg
+	if (pkg_head.magic != 0xEE) {
+		throw EIOException(__FILE__, __LINE__, "flag error");
+	}
+
+	//check crc32
+	ECRC32 crc32;
+	crc32.update((byte*)&pkg_head, sizeof(pkg_head)-sizeof(pkg_head.crc32));
+	pkg_head.crc32 = ntohl(pkg_head.crc32);
+	if (pkg_head.crc32 != crc32.getValue()) {
+		throw EIOException(__FILE__, __LINE__, "crc32 error");
+	}
+
+	pkg_head.reqid = ntohl(pkg_head.reqid);
+	pkg_head.pkglen = ntohl(pkg_head.pkglen);
+
+	return pkg_head;
+}
+
+static void write_pkg_head(EOutputStream* os, int type,
+		boolean next, int length, uint reqid=0) {
+	edb_pkg_head_t pkg_head;
+	memset(&pkg_head, 0, sizeof(pkg_head));
+	pkg_head.magic = 0xEE;
+	pkg_head.type = type;
+	pkg_head.gzip = 0;
+	pkg_head.next = next ? 1 : 0;
+	pkg_head.pkglen = htonl(length);
+	pkg_head.reqid = htonl(reqid);
+
+	ECRC32 crc32;
+	crc32.update((byte*)&pkg_head, sizeof(pkg_head)-sizeof(pkg_head.crc32));
+	pkg_head.crc32 = htonl(crc32.getValue());
+
+	os->write(&pkg_head, sizeof(pkg_head));
+}
+
+class PackageInputStream: public EInputStream {
+public:
+	PackageInputStream(EInputStream* cis): cis(cis) {
+	}
+	virtual int read(void *b, int len) THROWS(EIOException) {
+		if (bis == null) {
+			head = read_pkg_head(cis);
+			if (head.gzip) {
+				tis = new EBoundedInputStream(cis, head.pkglen);
+				bis = new EGZIPInputStream(tis.get());
+			} else {
+				bis = new EBoundedInputStream(cis, head.pkglen);
+			}
+		}
+		int r = bis->read(b, len);
+		if ((r == -1 || r == 0) && head.next) { //next
+			head = read_pkg_head(cis);
+			if (head.pkglen > 0) {
+				if (head.gzip) {
+					tis = new EBoundedInputStream(cis, head.pkglen);
+					bis = new EGZIPInputStream(tis.get());
+				} else {
+					bis = new EBoundedInputStream(cis, head.pkglen);
+				}
+				return bis->read(b, len);
+			} else {
+				return -1; //EOF
+			}
+		} else {
+			return r;
+		}
+	}
+private:
+	 EInputStream* cis;
+	 sp<EInputStream> tis;
+	 sp<EInputStream> bis;
+	 edb_pkg_head_t head;
+};
+
+#define MAX_PACKAGE_SIZE 32*1024 //32k
+class PackageOutputStream: public EOutputStream {
+public:
+	PackageOutputStream(EOutputStream* cos): cos(cos), buf(MAX_PACKAGE_SIZE + 8192) {
+	}
+	virtual void write(const void *b, int len) THROWS(EIOException) {
+		if (b && len > 0) {
+			buf.append(b, len);
+			if (buf.size() >= MAX_PACKAGE_SIZE) {
+				EByteArrayOutputStream baos;
+				EGZIPOutputStream gos(&baos);
+				gos.write(buf.data(), buf.size());
+				gos.finish();
+				//write head
+				write_pkg_head(cos, 1, true, true, baos.size());
+				//write body
+				cos->write(baos.data(), baos.size());
+
+				//reset buf
+				buf.clear();
+			}
+		} else {
+			//end stream
+			if (buf.size() > 0) {
+				EByteArrayOutputStream baos;
+				EGZIPOutputStream gos(&baos);
+				gos.write(buf.data(), buf.size());
+				gos.finish();
+				//write head
+				write_pkg_head(cos, 1, true, false, baos.size());
+				//write body
+				cos->write(baos.data(), baos.size());
+
+				//reset buf
+				buf.clear();
+			} else {
+				write_pkg_head(cos, 1, false, false, 0);
+			}
+		}
+	}
+private:
+	EOutputStream* cos;
+	EByteBuffer buf;
+};
+
+class DBProxyServer: public ESocketAcceptor, virtual public EDBProxyInf {
 public:
 	~DBProxyServer() {
 		somgr.soCloseAll();
@@ -311,98 +448,169 @@ public:
 				session->getRemoteAddress()->getAddress()->getHostAddress().c_str());
 
 		DBProxyServer* acceptor = dynamic_cast<DBProxyServer*>(session->getService());
-		ES_ASSERT(acceptor);
-
 		sp<EDatabase> database;
 
-		sp<EHttpRequest> request;
 		while(!session->getService()->isDisposed()) {
-			// do request read
+			sp<ESocket> socket = session->getSocket();
+			EInputStream* cis = socket->getInputStream();
+			EOutputStream* cos = socket->getOutputStream();
+
+			//req
+			EBson req;
 			try {
-				request = dynamic_pointer_cast<EHttpRequest>(session->read());
+				edb_pkg_head_t pkg_head = read_pkg_head(cis);
+				if (pkg_head.type != 0) { //非主请求
+					wlogger->error("request error.");
+					break;
+				}
+				EBoundedInputStream bis(cis, pkg_head.pkglen);
+				if (pkg_head.gzip) {
+					EGZIPInputStream gis(&bis);
+					EBsonParser bp(&gis);
+					bp.nextBson(&req);
+				} else {
+					EBsonParser bp(&bis);
+					bp.nextBson(&req);
+				}
 			} catch (ESocketTimeoutException& e) {
-				//LOG("session read timeout.");
 				continue;
+			} catch (EEOFException& e) {
+				wlogger->trace("session client closed.");
+				break;
 			} catch (EIOException& e) {
 				wlogger->error("session read error.");
 				break;
 			}
-			if (request == null) {
-				// client closed.
-				if (database != null) {
-					database->close();
-				}
-				wlogger->trace("session client closed.");
-				break;
+
+			//db open.
+			EString errmsg("unknown error.");
+			if (req.getInt(EDB_KEY_MSGTYPE) == DB_SQL_DBOPEN) {
+				database = doDBOpen(session, req, errmsg);
 			}
 
-			//req
-			EBson req;
-			req.Import(request->getBodyData(), request->getBodyLen());
-
-			if (req.getInt(EDB_KEY_MSGTYPE) == DB_SQL_DBOPEN) {
-				EString username = req.getString(EDB_KEY_USERNAME);
-				QueryUser* user = acceptor->usrmgr.checkUser(
-						username.c_str(),
-						req.getString(EDB_KEY_PASSWORD).c_str(),
-						req.getLLong(EDB_KEY_TIMESTAMP));
-				if (!user) {
-					EString msg = "username or password error.";
-					wlogger->warn(msg.c_str());
-					responseFailed(session, msg);
-					break;
-				}
-				VirtualDB* vdb = user->virdb;
-				if (!vdb) {
-					EString msg("no database access permission.");
-					wlogger->warn(msg.c_str());
-					responseFailed(session, msg);
-					break;
-				}
-				database = acceptor->somgr.getDatabase(vdb->dbType.c_str(), session->getRemoteAddress()->getHostName(), req.getString(EDB_KEY_CHARSET).c_str());
-				if (database == null) {
-					EString msg = EString::formatOf("database %s is closed.", vdb->dbType.c_str());
-					wlogger->warn(msg.c_str());
-					responseFailed(session, msg);
-					break;
-				}
-
-				//update some field to real data.
-				req.set(EDB_KEY_HOST, vdb->host.c_str());
-				req.setInt(EDB_KEY_PORT, vdb->port);
-				req.set(EDB_KEY_USERNAME, vdb->username.c_str());
-				req.set(EDB_KEY_PASSWORD, vdb->password.c_str());
-			} else if (database == null) {
+			if (database == null) {
+				wlogger->warn(errmsg.c_str());
+				responseFailed(cos, errmsg);
 				break;
 			}
 
 			//交由线程池去执行，以免协程阻塞
 			EFiberChannel<EBson> channel(0);
-			acceptor->executors->executeX([&database, &req, &channel]() {
-				sp<EBson> rep = database->processSQL(&req, null);
+			acceptor->executors->executeX([&database, &req, &channel, cis, cos, socket]() {
+				//协程时自动切换到非阻塞模式，这里要显示设置到阻塞模式。
+				ENetWrapper::configureBlocking(socket->getFD(), true);
+
+				sp<EBson> rep;
+				int opt = req.getInt(EDB_KEY_MSGTYPE);
+				if (opt == DB_SQL_EXECUTE || opt == DB_SQL_UPDATE) {
+					class BoundedIterator: public EIterator<EInputStream*> {
+					public:
+						BoundedIterator(EInputStream* cis): cis(cis) {}
+						virtual boolean hasNext() {
+							return true;
+						}
+						virtual EInputStream* next() {
+							iss = new PackageInputStream(cis);
+							return iss.get();
+						}
+						virtual void remove() { }
+						virtual EInputStream* moveOut() { return null; }
+					private:
+						 EInputStream* cis;
+						 sp<EInputStream> iss;
+					};
+					class BoundedIterable: public EIterable<EInputStream*> {
+					public:
+						BoundedIterable(EInputStream* cis): cis(cis) {}
+						 virtual sp<EIterator<EInputStream*> > iterator(int index=0) {
+							 return new BoundedIterator(cis);
+						 }
+					private:
+						 EInputStream* cis;
+					};
+
+					BoundedIterable bi(cis);
+					rep = database->processSQL(&req, &bi);
+				} else if (opt == DB_SQL_LOB_WRITE) {
+					PackageInputStream pis(cis);
+					rep = database->processSQL(&req, &pis);
+				} else if (opt == DB_SQL_LOB_READ) {
+					PackageOutputStream pos(cos);
+					rep = database->processSQL(&req, &pos);
+				} else {
+					rep = database->processSQL(&req, null);
+				}
+
+				//恢复状态
+				ENetWrapper::configureBlocking(socket->getFD(), false);
+
 				channel.write(rep);
 			});
 
 			//rep
 			sp<EBson> rep = channel.read();
 			ES_ASSERT(rep != null);
-			EByteBuffer out;
-			rep->Export(&out, null, false);
+			EByteBuffer buf;
+			rep->Export(&buf, null, false);
 
-			// do response write
-			session->write(new EHttpResponse(out.data(), out.size()));
+			write_pkg_head(cos, 0, false, buf.size());
+			cos->write(buf.data(), buf.size());
+		}
+
+		if (database != null) {
+			database->close();
 		}
 
 		wlogger->trace_("Out of Connection.");
 	}
 
-	static void responseFailed(ESocketSession* session, EString& errmsg) {
+	static sp<EDatabase> doDBOpen(ESocketSession* session, EBson& req, EString& errmsg) {
+		DBProxyServer* acceptor = dynamic_cast<DBProxyServer*>(session->getService());
+
+		EString username = req.getString(EDB_KEY_USERNAME);
+		QueryUser* user = acceptor->usrmgr.checkUser(
+				username.c_str(),
+				req.getString(EDB_KEY_PASSWORD).c_str(),
+				req.getLLong(EDB_KEY_TIMESTAMP));
+		if (!user) {
+			errmsg = "username or password error.";
+			return null;
+		}
+		VirtualDB* vdb = user->virdb;
+		if (!vdb) {
+			errmsg = "no database access permission.";
+			return null;
+		}
+
+		sp<EDatabase> database = acceptor->somgr.getDatabase(vdb->dbType.c_str(), dynamic_cast<EDBProxyInf*>(session->getService()));
+
+		//update some field to real data.
+		req.set(EDB_KEY_HOST, vdb->host.c_str());
+		req.setInt(EDB_KEY_PORT, vdb->port);
+		req.set(EDB_KEY_USERNAME, vdb->username.c_str());
+		req.set(EDB_KEY_PASSWORD, vdb->password.c_str());
+
+		return database;
+	}
+
+	static void responseFailed(EOutputStream* cos, EString& errmsg) {
 		sp<EBson> rep = new EBson();
 		rep->addInt(EDB_KEY_ERRCODE, ES_FAILURE);
 		rep->add(EDB_KEY_ERRMSG, errmsg.c_str());
-		EByteBuffer out;
-		rep->Export(&out, null, false);
-		session->write(new EHttpResponse(out.data(), out.size()));
+		EByteBuffer buf;
+		rep->Export(&buf, null, false);
+		write_pkg_head(cos, 0, false, buf.size());
+		cos->write(buf.data(), buf.size());
+	}
+
+	virtual EString getProxyVersion() {
+		return PROXY_VERSION;
+	}
+
+	virtual void dumpSQL(const char *oldSql, const char *newSql) {
+		if (slogger != null && (oldSql || newSql)) {
+			slogger->log(null, -1, ELogger::LEVEL_INFO, newSql ? newSql : oldSql, null);
+		}
 	}
 
 private:
@@ -418,7 +626,6 @@ static void startDBProxy(EConfig& conf) {
 
 	EBlacklistFilter blf;
 	EWhitelistFilter wlf;
-	EHttpCodecFilter hcf;
 	EConfig* subconf;
 
 	subconf = conf.getConfig("BLACKLIST");
@@ -438,8 +645,6 @@ static void startDBProxy(EConfig& conf) {
 		}
 		sa.getFilterChainBuilder()->addFirst("white", &wlf);
 	}
-
-	sa.getFilterChainBuilder()->addLast("http", &hcf);
 
 	sa.setConnectionHandler(DBProxyServer::onConnection);
 	sa.setMaxConnections(conf.getInt("COMMON/max_connections", 10000));

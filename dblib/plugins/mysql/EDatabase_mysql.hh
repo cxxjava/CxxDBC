@@ -29,8 +29,7 @@ class EDatabase_mysql: public EDatabase {
 public:
 	virtual ~EDatabase_mysql();
 
-	EDatabase_mysql(ELogger* workLogger, ELogger* sqlLogger,
-			const char* clientIP, const char* version);
+	EDatabase_mysql(EDBProxyInf* proxy);
 private:
 	MYSQL mysql;
 	MYSQL *m_Conn;
@@ -77,8 +76,8 @@ private:
 	sp<Result> m_Result;
 	
 private:
-	virtual sp<EBson> onExecute(EBson *req);
-	virtual sp<EBson> onUpdate(EBson *req);
+	virtual sp<EBson> onExecute(EBson *req, EIterable<EInputStream*>* itb);
+	virtual sp<EBson> onUpdate(EBson *req, EIterable<EInputStream*>* itb);
 	virtual sp<EBson> onMoreResult(EBson *req);
 	virtual sp<EBson> onResultFetch(EBson *req);
 	virtual sp<EBson> onResultClose(EBson *req);

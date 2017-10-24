@@ -23,13 +23,23 @@ interface EDatabaseInf: virtual public EObject {
 	virtual sp<EBson> processSQL(EBson *req, void *arg) = 0;
 
 	virtual int getErrorCode() = 0;
-	virtual const char* getErrorMessage() = 0;
+	virtual EString getErrorMessage() = 0;
 
-	virtual const char* getProxyVersion() = 0;
+	virtual EString getDBType() = 0;
 
 	virtual boolean open(const char *database, const char *host, int port,
 			const char *username, const char *password, const char *charset, int timeout) = 0;
 	virtual boolean close() = 0;
+};
+
+/**
+ * 数据库代理接口
+ */
+interface EDBProxyInf: virtual public EObject {
+	virtual ~EDBProxyInf() {};
+
+	virtual EString getProxyVersion() = 0;
+	virtual void dumpSQL(const char *oldSql, const char *newSql) = 0;
 };
 
 } /* namespace edb */

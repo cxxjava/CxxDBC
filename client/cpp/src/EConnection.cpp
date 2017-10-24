@@ -36,6 +36,10 @@ EConnection::EConnection(boolean proxy):
 		clientEncoding(SQL_DEFAULT_ENCODING),
 		autoCommit(true),
 		dbHandler(this) {
+#if EDB_CLIENT_STATIC
+	isProxymode = false;
+#endif
+
 	if (dbType.isEmpty()) {
 		dbType = getDefaultDBType();
 	}
@@ -52,6 +56,10 @@ EConnection::EConnection(const char* dbtype, boolean proxy):
 		clientEncoding(SQL_DEFAULT_ENCODING),
 		autoCommit(true),
 		dbHandler(this) {
+#if EDB_CLIENT_STATIC
+	isProxymode = false;
+#endif
+
 	if (dbType.isEmpty()) {
 		dbType = getDefaultDBType();
 	}

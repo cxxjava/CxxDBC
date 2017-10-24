@@ -1,5 +1,6 @@
 ################OPTION###################
 HAVE_READLINE=1
+HAVE_TARSCLIENT=1
 
 KERNEL:=$(shell uname)
 LIBDIR = linux
@@ -29,52 +30,48 @@ $(info SHAREDLIB=$(SHAREDLIB))
 ifeq ($(HAVE_READLINE), 1)
 COMPILEOPTION = -c -g -O2 -DHAVE_READLINE -D__MAIN__
 CPPCOMPILEOPTION = -std=$(CPPSTD) -c -g -O2 -fpermissive -DHAVE_READLINE -D__MAIN__
-SHAREDLIB = $(LIBEFC) -ldl -lcrypto -lssl -lreadline -lpthread
+SHAREDLIB = $(LIBEFC) -ldl -lcrypto -lssl -lreadline -lpthread -liconv
 else
 COMPILEOPTION = -c -g -O2 -D__MAIN__
 CPPCOMPILEOPTION = -std=$(CPPSTD) -c -g -O2 -fpermissive -D__MAIN__
-SHAREDLIB = $(LIBEFC) -ldl -lcrypto -lssl -lpthread
+SHAREDLIB = $(LIBEFC) -ldl -lcrypto -lssl -lpthread -liconv
 endif
 
 CCOMPILE = gcc
 CPPCOMPILE = g++
 OUTPUT = esql
 INCLUDEDIR = \
-	-I../../../CxxJDK/inc \
-	-I../../../CxxJDK/inc/comm \
-	-I../../../CxxJDK/inc/efc \
-	-I../../../CxxJDK/inc/efc/concurrent \
-	-I../../../CxxJDK/inc/efc/cpp11 \
-	-I../../../CxxJDK/inc/efc/nio \
-	-I../../../CxxJDK/inc/libc \
-	-I../../../CxxLog4j \
-	-I../../../CxxLog4j/inc \
+	-I../../../efc \
+	-I../../../CxxJDK/efc \
 	-I../../client/cpp/ \
-	-I/usr/local/Cellar/openssl/1.0.2g/include
+	-I../../client/cpp/src/tarscli \
+	-I../../client/cpp/src/tarscli/util/include \
+	-I/usr/local/Cellar/openssl/1.0.2g/include \
 
 LINK = g++
 LINKOPTION = -std=$(CPPSTD) -g -o $(OUTPUT)
-LIBDIRS = -L../../../CxxJDK/lib/$(LIBDIR) \
+LIBDIRS = -L../../../efc/lib/$(LIBDIR) -L../../../CxxJDK/lib/$(LIBDIR) \
 	-L/usr/local/Cellar/openssl/1.0.2g/lib
 
 APPENDLIB = 
-OBJS = esql.o \
-	../../client/cpp/src/ECommonStatement.o \
-	../../client/cpp/src/EConnection.o \
-	../../client/cpp/src/EConnectionPool.o \
-	../../client/cpp/src/EDatabaseMetaData.o \
-	../../client/cpp/src/EDBHandler.o \
-	../../client/cpp/src/EResultSet.o \
-	../../client/cpp/src/EResultSetMetaData.o \
-	../../client/cpp/src/ESavepoint.o \
-	../../client/cpp/src/EStatement.o \
-	../../client/cpp/src/EUpdateStatement.o \
+LOCAL_OBJ = esql.o \
 
-$(OUTPUT): $(OBJS) $(APPENDLIB)
-	$(LINK) $(LINKOPTION) $(LIBDIRS) $(OBJS) $(SHAREDLIB) $(APPENDLIB)
+LOCAL_SRC   += $(sort $(wildcard ../../client/cpp/src/*.cpp))
+LOCAL_SRC   += $(sort $(wildcard ../../../efc/utils/src/*.cpp ../../../CxxJDK/efc/utils/src/*.cpp))
+
+ifeq ($(HAVE_TARSCLIENT), 1)
+LOCAL_SRC   += $(sort $(wildcard ../../client/cpp/src/tarscli/libservant/*.cpp))
+LOCAL_SRC   += $(sort $(wildcard ../../client/cpp/src/tarscli/util/src/*.cpp))
+endif
+
+LOCAL_OBJ   += $(patsubst %.cpp,%.o, $(patsubst %.c,%.o, $(LOCAL_SRC)))
+
+
+$(OUTPUT): $(LOCAL_OBJ) $(APPENDLIB)
+	$(LINK) $(LINKOPTION) $(LIBDIRS) $(LOCAL_OBJ) $(SHAREDLIB) $(APPENDLIB)
 
 clean: 
-	rm -f $(OBJS)
+	rm -f $(LOCAL_OBJ)
 	rm -f $(OUTPUT)
 
 all: clean $(OUTPUT)

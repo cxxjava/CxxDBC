@@ -91,7 +91,7 @@ EStatement& EUpdateStatement::execute(void) {
 	sqlStmt.setByte(EDB_KEY_RESUME, isFailedResume ? 1 : 0);
 
 	//请求并获取结果
-	result = connection->dbHandler.executeSQL(&sqlStmt);
+	result = connection->dbHandler.executeSQL(&sqlStmt, &streamParams);
 
 	if (!result || result->getInt(EDB_KEY_ERRCODE) != ES_SUCCESS) {
 		throw ESQLException(__FILE__, __LINE__, result->getString(EDB_KEY_ERRMSG).c_str());

@@ -31,8 +31,7 @@ class EDatabase_freetds: public EDatabase {
 public:
 	virtual ~EDatabase_freetds();
 
-	EDatabase_freetds(ELogger* workLogger, ELogger* sqlLogger,
-			const char* clientIP, const char* version);
+	EDatabase_freetds(EDBProxyInf* proxy);
 private:
 	CS_CONTEXT *m_Ctx;
 	CS_CONNECTION *m_Conn;
@@ -68,8 +67,8 @@ private:
 	sp<Result> m_Result;
 	
 private:
-	virtual sp<EBson> onExecute(EBson *req);
-	virtual sp<EBson> onUpdate(EBson *req);
+	virtual sp<EBson> onExecute(EBson *req, EIterable<EInputStream*>* itb);
+	virtual sp<EBson> onUpdate(EBson *req, EIterable<EInputStream*>* itb);
 	virtual sp<EBson> onMoreResult(EBson *req);
 	virtual sp<EBson> onResultFetch(EBson *req);
 	virtual sp<EBson> onResultClose(EBson *req);

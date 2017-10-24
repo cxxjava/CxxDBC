@@ -106,4 +106,15 @@ typedef enum
 	DB_dtCursor             =   16                //!only for callable statememt output parameter and cursor type
 } edb_field_type_e;
 
+struct edb_pkg_head_t {
+    unsigned char magic;  //固定'0xEE'
+    unsigned char type:1; //0-主请求|1-lob流数据
+    unsigned char gzip:1; //1-body gziped
+    unsigned char next:1; //1-has next slices
+    unsigned char xxx :5; //reserved
+    unsigned int  pkglen; //body长度
+    unsigned int  reqid;  //req消息ID
+    unsigned int  crc32;  //head值校验(不含自身)
+};
+
 #endif /* __EDBINTERFACE_H__ */

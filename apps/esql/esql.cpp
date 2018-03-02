@@ -479,12 +479,8 @@ static int Main(int argc, const char **argv)
 	return 0;
 }
 
-#ifdef DEBUG
+//=============================================================================
+
 MAIN_IMPL(test_esql) {
 	return Main(argc, argv);
 }
-#else
-int main(int argc, const char **argv) {
-	return Main(argc, argv);
-}
-#endif

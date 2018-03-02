@@ -50,7 +50,7 @@ int EResultSetMetaData::getColumnDisplaySize(int column) {
 	return fields->getInt(path.c_str());
 }
 
-EStringBase EResultSetMetaData::toString() {
+EString EResultSetMetaData::toString() {
 	return fields->toString();
 }
 

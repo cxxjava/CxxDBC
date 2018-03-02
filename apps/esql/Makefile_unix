@@ -1,6 +1,7 @@
 ################OPTION###################
 HAVE_READLINE=1
-HAVE_TARSCLIENT=1
+
+HAVE_TARSCLIENT=$(shell grep USE_TARS_CLIENT ../../client/cpp/config.hh 2>&1 | awk '{printf $$3}' )
 
 KERNEL:=$(shell uname)
 LIBDIR = linux

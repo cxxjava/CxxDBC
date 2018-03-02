@@ -5,7 +5,7 @@
 
 #include "Edb.hh"
 
-#define LOG(fmt,...) ESystem::out->println(fmt, ##__VA_ARGS__)
+#define LOG(fmt,...) ESystem::out->printfln(fmt, ##__VA_ARGS__)
 
 #define HOST "localhost"
 #define PORT "6633"

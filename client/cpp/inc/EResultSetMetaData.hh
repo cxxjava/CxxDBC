@@ -100,7 +100,7 @@ public:
 	/**
 	 *
 	 */
-	virtual EStringBase toString();
+	virtual EString toString();
 
 private:
 	friend class EResultSet;

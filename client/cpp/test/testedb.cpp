@@ -7,9 +7,8 @@
 
 #include "es_main.h"
 #include "Edb.hh"
-#include "ELog.hh"
 
-#define LOG(fmt,...) ESystem::out->println(fmt, ##__VA_ARGS__)
+#define LOG(fmt,...) ESystem::out->printfln(fmt, ##__VA_ARGS__)
 
 extern void test_db_mysql(void);
 extern void test_db_postgres(void);
@@ -19,7 +18,6 @@ extern void test_db_sybase(void);
 
 MAIN_IMPL(testedb) {
 	ESystem::init(argc, argv);
-	ELoggerManager::init("log4e.properties");
 
 	try {
 		do {
@@ -37,7 +35,7 @@ MAIN_IMPL(testedb) {
 		} while (0);
 	}
 	catch (EException& e) {
-		ESystem::out->println("e=%s", e.toString().c_str());
+		ESystem::out->printfln("e=%s", e.toString().c_str());
 		e.printStackTrace();
 	}
 	catch (EThrowable& e) {

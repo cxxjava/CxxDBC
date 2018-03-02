@@ -13,14 +13,16 @@
 
 using namespace efc::edb;
 
-#define PROXY_VERSION "version 0.1.0"
+#define PROXY_VERSION "version 0.2.0"
+
+#define PID_FILE "./DBPROXY.pid"
 
 #define DEFAULT_CONNECT_PORT 6633
 #define DEFAULT_CONNECT_SSL_PORT 6643
 
 #define DBLIB_STATIC 0
 
-#define LOG(fmt,...) ESystem::out->println(fmt, ##__VA_ARGS__)
+#define LOG(fmt,...) ESystem::out->printfln(fmt, ##__VA_ARGS__)
 
 extern "C" {
 extern efc::edb::EDatabase* makeDatabase(EDBProxyInf* proxy);
@@ -450,11 +452,11 @@ public:
 		DBProxyServer* acceptor = dynamic_cast<DBProxyServer*>(session->getService());
 		sp<EDatabase> database;
 
-		while(!session->getService()->isDisposed()) {
-			sp<ESocket> socket = session->getSocket();
-			EInputStream* cis = socket->getInputStream();
-			EOutputStream* cos = socket->getOutputStream();
+		sp<ESocket> socket = session->getSocket();
+		EInputStream* cis = socket->getInputStream();
+		EOutputStream* cos = socket->getOutputStream();
 
+		while(!session->getService()->isDisposed()) {
 			//req
 			EBson req;
 			try {
@@ -621,72 +623,274 @@ private:
 	EExecutorService* executors;
 };
 
-static void startDBProxy(EConfig& conf) {
-	DBProxyServer sa(conf);
+//=============================================================================
 
-	EBlacklistFilter blf;
-	EWhitelistFilter wlf;
-	EConfig* subconf;
-
-	subconf = conf.getConfig("BLACKLIST");
-	if (subconf) {
-		EArray<EString*> disallows = subconf->keyNames();
-		for (int i=0; i<disallows.size(); i++) {
-			blf.block(disallows[i]->c_str());
-		}
-		sa.getFilterChainBuilder()->addFirst("black", &blf);
-	}
-
-	subconf = conf.getConfig("WHITELIST");
-	if (subconf) {
-		EArray<EString*> allows = subconf->keyNames();
-		for (int i=0; i<allows.size(); i++) {
-			wlf.allow(allows[i]->c_str());
-		}
-		sa.getFilterChainBuilder()->addFirst("white", &wlf);
-	}
-
-	sa.setConnectionHandler(DBProxyServer::onConnection);
-	sa.setMaxConnections(conf.getInt("COMMON/max_connections", 10000));
-	sa.setSoTimeout(conf.getInt("COMMON/socket_timeout", 3) * 1000);
-
-	//ssl
-	EString ssl_cert = conf.getString("COMMON/ssl_cert");
-	EString ssl_key = conf.getString("COMMON/ssl_key");
-	if (!ssl_cert.isEmpty()) {
-		sa.setSSLParameters(null,
-				ssl_cert.c_str(),
-				ssl_key.c_str(),
-				null, null);
-	}
-
-	EArray<EConfig*> confs = conf.getConfigs("SERVICE");
-	for (int i=0; i<confs.size(); i++) {
-		boolean ssl = confs[i]->getBoolean("ssl_active", false);
-		int port = confs[i]->getInt("listen_port", ssl ? DEFAULT_CONNECT_SSL_PORT : DEFAULT_CONNECT_PORT);
-		LOG("listen port: %d", port);
-		sa.bind("0.0.0.0", port, ssl);
-	}
-
-	sa.listen();
-}
-
-/**
- * Usage: dbproxy -c [config file]
- *                +d : daemon mode
- *                +c : show cofing sample
- *                +h : show help
- *                +v : show version
- * example: dbproxy -c dbproxy.ini +d"
+/*
+ * Global Application Object.
  */
-static void Usage(int flag) {
-	if (flag == 0) {
-		LOG("Usage: %s -c [config file]", ESystem::getExecuteFilename());
-		LOG("        +d : daemon mode");
-		LOG("        +c : show cofing sample");
-		LOG("        +h : show help");
-		LOG("        +v : show version");
-	} else {
+class Server;
+static Server* g_server = null;
+
+class Server {
+public:
+	Server(): isDaemon(false), dbserver(null) {
+	}
+	~Server() {
+		delete dbserver;
+	}
+
+public:
+	#define SERVER_BASEARGS "c:s:dxvh?"
+
+	typedef enum {DO_START, DO_RESTART, DO_STOP, DO_KILL, UNKNOWN} action_e;
+
+	int Usage(int argc, const char * const *argv) {
+
+		/* Copyright information*/
+		LOG("=====================================");
+		LOG("| Name: lite_dbproxy, " PROXY_VERSION " |");
+		LOG("| Author: cxxjava@163.com           |");
+		LOG("| https://github.com/cxxjava        |");
+		LOG("=====================================");
+
+		if (argc < 2) {
+			show_help(argc, argv);
+			return -1;
+		}
+
+		action = UNKNOWN;
+		int o;
+		while (-1 != (o = getopt(argc, (char **)argv, SERVER_BASEARGS))) {
+			switch(o) {
+			case 'c':
+				action = DO_START;
+				cfgFile = optarg;
+				break;
+			case 'd':
+				isDaemon = true;
+				break;
+			case 's':
+				if (strcmp("restart", optarg) == 0)
+					action = DO_RESTART;
+				else if (strcmp("stop", optarg) == 0)
+					action = DO_STOP;
+				else if (strcmp("kill", optarg) == 0)
+					action = DO_KILL;
+				else {
+					show_help(argc, argv);
+					return -1;
+				}
+				break;
+			case 'x':
+				show_config_sample();
+				return -1;
+			case 'v':
+				LOG("server version: %s\n", PROXY_VERSION);
+				return -1;
+			case 'h':
+			default:
+				show_help(argc, argv);
+				return -1;
+			}
+		}
+
+		if (action == UNKNOWN) {
+			show_help(argc, argv);
+			return -1;
+		}
+
+		return 0;
+	}
+
+	void doAction() {
+		int pid = -1;
+		if (action != DO_START) {
+			pid = getPidFromFile();
+			if (pid == -1) {
+				throw ERuntimeException(__FILE__, __LINE__, "no pid file.");
+			}
+		}
+
+		switch (action) {
+		case DO_RESTART: {
+			kill(pid, SIGQUIT);
+			eso_unlink(PID_FILE);
+
+			EThread::sleep(100);
+		}
+		case DO_START: {
+			//load config
+			config.loadFromINI(cfgFile.c_str());
+
+			//test db connection
+			DBSoHandleManager somgr(config);
+			somgr.testConnectAll();
+
+			//start server
+			if (isDaemon) {
+				ESystem::detach(true, 0, 0, 0);
+			}
+
+			//store master pid
+			storePidToFile();
+
+			sp<EThread> worker = EThread::executeX([this](){
+				/*FIXME: 中断将发生在main线程，
+				 *而协程框架暂不能很好的支持信号中断，
+				 *所以这里应避开协程在main线程中执行。
+				 */
+				this->startDBProxy();
+			});
+
+			eso_signal(SIGQUIT, sig_stop_worker);
+			eso_signal(SIGTERM, sig_kill_worker);
+			worker->join();
+
+			break;
+		}
+		case DO_STOP:
+			kill(pid, SIGQUIT);
+			eso_unlink(PID_FILE);
+			break;
+		case DO_KILL:
+			kill(pid, SIGTERM);
+			eso_unlink(PID_FILE);
+			break;
+		default:
+			break;
+		}
+	}
+
+public:
+	static void sig_stop_worker(int sig_no) {
+		g_server->shutdown();
+	}
+
+	static void sig_kill_worker(int sig_no) {
+		g_server->terminate();
+	}
+
+	void shutdown() {
+		dbserver->shutdown();
+	}
+
+	void terminate() {
+		dbserver->dispose();
+	}
+
+	void storePidToFile() {
+		EFileOutputStream fos(PID_FILE);
+		EDataOutputStream dos(&fos);
+		dos.writeInt(eso_os_process_current()); //pid
+		dos.writeBoolean(isDaemon); //daemon flag
+		dos.write(cfgFile.c_str());
+	}
+
+	int getPidFromFile() {
+		EFileInputStream fis(PID_FILE);
+		EDataInputStream dis(&fis);
+		int pid = dis.readInt(); //pid
+		isDaemon = dis.readBoolean();
+		sp<EString> line = dis.readLine();
+		cfgFile = line->c_str();
+		return pid;
+	}
+
+	void startDBProxy() {
+		if (dbserver) return;
+
+		dbserver = new DBProxyServer(config);
+
+		EBlacklistFilter blf;
+		EWhitelistFilter wlf;
+		EConfig* subconf;
+
+		subconf = config.getConfig("BLACKLIST");
+		if (subconf) {
+			EArray<EString*> disallows = subconf->keyNames();
+			for (int i=0; i<disallows.size(); i++) {
+				blf.block(disallows[i]->c_str());
+			}
+			dbserver->getFilterChainBuilder()->addFirst("black", &blf);
+		}
+
+		subconf = config.getConfig("WHITELIST");
+		if (subconf) {
+			EArray<EString*> allows = subconf->keyNames();
+			for (int i=0; i<allows.size(); i++) {
+				wlf.allow(allows[i]->c_str());
+			}
+			dbserver->getFilterChainBuilder()->addFirst("white", &wlf);
+		}
+
+		dbserver->setConnectionHandler(DBProxyServer::onConnection);
+		dbserver->setMaxConnections(config.getInt("COMMON/max_connections", 10000));
+		dbserver->setSoTimeout(config.getInt("COMMON/socket_timeout", 3) * 1000);
+
+		//ssl
+		EString ssl_cert = config.getString("COMMON/ssl_cert");
+		EString ssl_key = config.getString("COMMON/ssl_key");
+		if (!ssl_cert.isEmpty()) {
+			dbserver->setSSLParameters(null,
+					ssl_cert.c_str(),
+					ssl_key.c_str(),
+					null, null);
+		}
+
+		EArray<EConfig*> confs = config.getConfigs("SERVICE");
+		for (int i=0; i<confs.size(); i++) {
+			boolean ssl = confs[i]->getBoolean("ssl_active", false);
+			int port = confs[i]->getInt("listen_port", ssl ? DEFAULT_CONNECT_SSL_PORT : DEFAULT_CONNECT_PORT);
+			LOG("listen port: %d", port);
+			dbserver->bind("0.0.0.0", port, ssl);
+		}
+
+		dbserver->setReuseAddress(true);
+
+		int retry_times = 3;
+		while (retry_times-- > 0) {
+			if (retry_times == 0) {
+				dbserver->listen();
+				break;
+			} else {
+				try {
+					dbserver->listen();
+					break;
+				} catch (EBindException& e) {
+					//
+				}
+				EThread::sleep(100);
+			}
+		}
+	}
+
+private:
+	EString cfgFile;
+	action_e action;
+	boolean isDaemon;
+	EConfig config;
+	DBProxyServer* dbserver;
+
+	static DBProxyServer* g_dbproxy;
+
+	static void show_help(int argc, const char * const *argv)
+	{
+		const char *bin = eso_filepath_name_get(argv[0]);
+
+		LOG("Usage: %s [-c config_file] [-d]", bin);
+		LOG("       %s [-s restart|stop|kill]", bin);
+		LOG("       %s [-x] [-v] [-h] [?]", bin);
+		LOG("Options:");
+		LOG("	-c : start with a config file");
+		LOG("	-d : daemon mode");
+		LOG("	-s : restart|stop|kill");
+		LOG("	-x : show cofing sample");
+		LOG("	-v : show version number");
+		LOG("	-h : list available command line options");
+		LOG("	?  : the same '-h'");
+	}
+
+	static void show_config_sample() {
 		LOG("#dbproxy config sample:");
 		LOG("[COMMON]");
 		LOG("#最大连接数");
@@ -696,9 +900,11 @@ static void Usage(int flag) {
 		LOG("#SSL证书设置");
 		LOG("ssl_cert = \"../test/certs/tests-cert.pem\"");
 		LOG("ssl_key = \"../test/certs/tests-key.pem\"");
+		LOG("");
 		LOG("[SERVICE]");
 		LOG("#服务端口号");
 		LOG("listen_port = 6633");
+		LOG("");
 		LOG("[SERVICE]");
 		LOG("#服务端口号");
 		LOG("listen_port = 6643");
@@ -726,7 +932,9 @@ static void Usage(int flag) {
 		LOG("#服务数据库列表: 数据库别名=数据库访问URL");
 		LOG("alias_dbname = \"edbc:[dbtype]://[host:port]/[database]?connectTimeout=[seconds]&username=[xxx]&password=[xxx]\"");
 	}
-}
+};
+
+//=============================================================================
 
 static int Main(int argc, const char **argv) {
 	ESystem::init(argc, argv);
@@ -735,60 +943,20 @@ static int Main(int argc, const char **argv) {
 	wlogger = ELoggerManager::getLogger("work");
 	slogger = ELoggerManager::getLogger("sql");
 
-	boolean show = false;
-
-	if (ESystem::containsProgramArgument("+h")) {
-		show = true;
-		Usage(0);
-	}
-
-	if (ESystem::containsProgramArgument("+v")) {
-		show = true;
-		LOG(PROXY_VERSION);
-	}
-
-	if (ESystem::containsProgramArgument("+c")) {
-		show = true;
-		Usage(1);
-	}
-
-	if (show) {
-		return 0;
-	}
-
 	try {
-		EString s;
+		Server server;
 
-		//daemon
-		boolean daemon = ESystem::containsProgramArgument("+d");
+		g_server = &server;
 
-		//conf
-		EConfig conf;
-		s = ESystem::getProgramArgument("c");
-		if (!s.isEmpty()) {
-			conf.loadFromINI(s.c_str());
+		if (server.Usage(argc, argv) != 0) {
+			return 0;
 		}
 
-		if (conf.isEmpty()) {
-			Usage(0);
-			return -1;
-		}
-		//LOG(conf.toString().c_str());
+		server.doAction();
 
-		//test db connection
-		DBSoHandleManager somgr(conf);
-		somgr.testConnectAll();
-
-		//start server
-		if (daemon) {
-			ESystem::detach(true, 0, 0, 0);
-		}
-		startDBProxy(conf);
-	}
-	catch (EException& e) {
+	} catch (EException& e) {
 		e.printStackTrace();
-	}
-	catch (...) {
+	} catch (...) {
 	}
 
 	ESystem::exit(0);
@@ -796,13 +964,9 @@ static int Main(int argc, const char **argv) {
 	return 0;
 }
 
+//=============================================================================
 
-#ifdef DEBUG
 MAIN_IMPL(testedb_lite_dbproxy) {
 	return Main(argc, argv);
 }
-#else
-int main(int argc, const char **argv) {
-	return Main(argc, argv);
-}
-#endif
+

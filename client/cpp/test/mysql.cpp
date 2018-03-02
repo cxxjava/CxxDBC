@@ -5,12 +5,12 @@
 
 #include "Edb.hh"
 
-#define LOG(fmt,...) ESystem::out->println(fmt, ##__VA_ARGS__)
+#define LOG(fmt,...) ESystem::out->printfln(fmt, ##__VA_ARGS__)
 
-#define HOST "192.168.2.61"
-#define PORT "3306"
+#define HOST "localhost"
+#define PORT "6633"
 #define DATABASE "mysql"
-#define USERNAME "root"
+#define USERNAME "mysql"
 #define PASSWORD "password"
 
 static void test_db_connect() {

@@ -445,7 +445,7 @@ public:
 		executors = EExecutors::newCachedThreadPool();
 	}
 
-	static void onConnection(ESocketSession* session, ESocketAcceptor::Service* service) {
+	static void onConnection(sp<ESocketSession> session, ESocketAcceptor::Service* service) {
 		wlogger->trace_("onConnection: service=%s, client=%s", service->toString().c_str(),
 				session->getRemoteAddress()->getAddress()->getHostAddress().c_str());
 
@@ -566,7 +566,7 @@ public:
 		wlogger->trace_("Out of Connection.");
 	}
 
-	static sp<EDatabase> doDBOpen(ESocketSession* session, EBson& req, EString& errmsg) {
+	static sp<EDatabase> doDBOpen(sp<ESocketSession> session, EBson& req, EString& errmsg) {
 		DBProxyServer* acceptor = dynamic_cast<DBProxyServer*>(session->getService());
 
 		EString username = req.getString(EDB_KEY_USERNAME);
@@ -830,19 +830,21 @@ public:
 		//ssl
 		EString ssl_cert = config.getString("COMMON/ssl_cert");
 		EString ssl_key = config.getString("COMMON/ssl_key");
-		if (!ssl_cert.isEmpty()) {
-			dbserver->setSSLParameters(null,
-					ssl_cert.c_str(),
-					ssl_key.c_str(),
-					null, null);
-		}
 
 		EArray<EConfig*> confs = config.getConfigs("SERVICE");
 		for (int i=0; i<confs.size(); i++) {
 			boolean ssl = confs[i]->getBoolean("ssl_active", false);
 			int port = confs[i]->getInt("listen_port", ssl ? DEFAULT_CONNECT_SSL_PORT : DEFAULT_CONNECT_PORT);
 			LOG("listen port: %d", port);
-			dbserver->bind("0.0.0.0", port, ssl);
+			dbserver->bind("0.0.0.0", port, ssl, null, [&ssl_cert, &ssl_key](ESocketAcceptor::Service& service){
+				if (service.sslActive && !ssl_cert.isEmpty()) {
+					sp<ESSLServerSocket> sss = dynamic_pointer_cast<ESSLServerSocket>(service.ss);
+					sss->setSSLParameters(
+							ssl_cert.c_str(),
+							ssl_key.c_str(),
+							null);
+				}
+			});
 		}
 
 		dbserver->setReuseAddress(true);

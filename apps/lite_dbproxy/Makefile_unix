@@ -53,18 +53,20 @@ INCLUDEDIR = \
 	-I../../../CxxConet \
 	-I../../../CxxConet/inc \
 	-I../../../CxxConet/filter/http \
-	-I/usr/local/Cellar/openssl/1.0.2g/include \
+	-I../../../third_party \
+	-I/usr/local/opt/openssl@1.0/include \
 
 LINK = g++
 LINKOPTION = -std=$(CPPSTD) -g
-LIBDIRS = -L../../../efc/lib/$(LIBDIR) -L../../../CxxJDK/lib/$(LIBDIR)
+LIBDIRS = -L../../../efc/lib/$(LIBDIR) -L../../../CxxJDK/lib/$(LIBDIR) -L/usr/local/opt/openssl@1.0/lib
 APPENDLIB = 
 
 BASE_SRC += $(sort $(wildcard ../../../efc/utils/src/*.cpp ../../../CxxJDK/efc/utils/src/*.cpp))
 BASE_SRC += $(sort $(wildcard ../../../eco/src/*.cpp ../../../eco/src/*.c  ../../../CxxFiber/src/*.cpp ../../../CxxFiber/src/*.c))
-BASE_SRC += $(sort $(wildcard ../../../enaf/src/*.cpp ../../../enaf/filter/http/*.cpp  ../../../CxxConet/src/*.cpp ../../../CxxConet/filter/http/*.cpp))
+BASE_SRC += $(sort $(wildcard ../../../enaf/src/*.cpp ../../../enaf/filter/http/*.cpp ../../../enaf/http/source/*.cc ../../../enaf/http/source/http1/*.cc ../../../enaf/http/source/http2/*.cc  ../../../CxxConet/src/*.cpp ../../../CxxConet/filter/http/*.cpp ../../../CxxConet/http/source/*.cc ../../../CxxConet/http/source/http1/*.cc ../../../CxxConet/http/source/http2/*.cc))
 BASE_SRC += $(sort $(wildcard ../../../elog/src/*.cpp ../../../CxxLog4j/src/*.cpp))
-BASE_OBJS   += $(patsubst %.cpp,%.o, $(patsubst %.c,%.o, $(BASE_SRC)))
+BASE_SRC += $(sort $(wildcard ../../../third_party/http_parser/*.c ../../../third_party/nghttp2/*.c ../../../third_party/http_parser/*.c ../../../third_party/nghttp2/*.c))
+BASE_OBJS   += $(patsubst %.cpp,%.o, $(patsubst %.cc,%.o, $(patsubst %.c,%.o, $(BASE_SRC))))
 
 DBPROXY_OBJS = main.o ../../dblib/src/EDatabase.o \
 
@@ -75,12 +77,15 @@ clean:
 	rm -f $(BASE_OBJS) $(DBPROXY_OBJS) $(BENCHMARK)
 
 all: clean $(DBPROXY) clean
-.PRECIOUS:%.cpp %.c
+.PRECIOUS:%.cpp %.c %.cc
 .SUFFIXES:
-.SUFFIXES:  .c .o .cpp
+.SUFFIXES:  .c .o .cpp .cc
 
 .cpp.o:
 	$(CPPCOMPILE) -c -o $*.o $(CPPCOMPILEOPTION) $(INCLUDEDIR)  $*.cpp
+
+.cc.o:
+	$(CPPCOMPILE) -c -o $*.o $(CPPCOMPILEOPTION) $(INCLUDEDIR)  $*.cc
 
 .c.o:
 	$(CCOMPILE) -c -o $*.o $(CCOMPILEOPTION) $(INCLUDEDIR) $*.c
